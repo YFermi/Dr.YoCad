@@ -45,6 +45,25 @@ async function buildServer() {
     }
   );
 
+  // Treat an empty body sent with Content-Type: application/json as "no body"
+  // (Express/body-parser behavior) instead of 400 FST_ERR_CTP_EMPTY_JSON_BODY.
+  // Bodyless POSTs such as /files/:id/presence/ping come from generic clients
+  // that always set the header. Non-empty bodies use Fastify's default secure
+  // JSON parser (prototype-poisoning protection unchanged).
+  const defaultJsonParser = fastify.getDefaultJsonParser('error', 'error');
+  fastify.removeContentTypeParser('application/json');
+  fastify.addContentTypeParser(
+    'application/json',
+    { parseAs: 'string' },
+    (request, body, done) => {
+      if (typeof body === 'string' && body.trim() === '') {
+        done(null, undefined);
+        return;
+      }
+      defaultJsonParser(request, body as string, done);
+    }
+  );
+
   await fastify.register(cors, {
     origin: process.env.WEB_URL ?? 'http://localhost:5173',
     credentials: true,
