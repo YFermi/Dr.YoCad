@@ -102,6 +102,14 @@ else
   exit 1
 fi
 
+# 1b. Seed STEP fixture (read by apps/api/prisma/seed.ts) converts via OCCT to a 50 mm cube
+SEED_STEP_OUT=$(cd "$(dirname "$0")/../apps/api" && node_modules/.bin/tsx -e "import('./src/lib/proceduralGlb.ts').then(async (m) => { const io = new (await import('@gltf-transform/core')).NodeIO(); const a = await m.convertUploadedBuffer(require('fs').readFileSync('../../scripts/seed-models/cube-50mm.step'), 'cube-50mm.step'); const d = await io.readBinary(new Uint8Array(a.glbBuffer)); const p = d.getRoot().listAccessors().find((x) => x.getType() === 'VEC3'); console.log(p.getMax([]).map((v, i) => v - p.getMin([])[i]).join(',')); })" 2>&1 | tail -1)
+if [ "${SEED_STEP_OUT}" = "50,50,50" ]; then
+  step_pass "1b. Seed fixture cube-50mm.step converts via OCCT to 50 x 50 x 50 mm"
+else
+  step_fail "1b. Seed fixture cube-50mm.step" "${SEED_STEP_OUT}"
+fi
+
 # 2. Login as demo admin
 LOGIN_RESP=$(curl -sS -X POST "${API_URL}/auth/login" \
   -H "Content-Type: application/json" \
