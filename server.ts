@@ -112,12 +112,11 @@ import {
   checkAiRateLimit,
   type AiRateLimitBucket,
 } from './apps/api/src/lib/aiRateLimit.ts';
+import { resolveJwtSecret } from './apps/api/src/lib/jwtSecrets.ts';
 
 const PORT = Number(process.env.PORT ?? 3000);
-const ACCESS_SECRET =
-  process.env.JWT_ACCESS_SECRET ?? 'cadline-preview-access-secret-32chars';
-const REFRESH_SECRET =
-  process.env.JWT_REFRESH_SECRET ?? 'cadline-preview-refresh-secret-32chars';
+const ACCESS_SECRET = resolveJwtSecret('JWT_ACCESS_SECRET');
+const REFRESH_SECRET = resolveJwtSecret('JWT_REFRESH_SECRET');
 const UPLOAD_ROOT = path.resolve(process.cwd(), '.tmp-uploads');
 fs.mkdirSync(UPLOAD_ROOT, { recursive: true });
 

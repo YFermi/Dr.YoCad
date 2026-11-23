@@ -2,12 +2,11 @@ import crypto from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import jwt from 'jsonwebtoken';
 import { PERMISSION_RANK, SharePermission, UserRole } from '@cadline/shared';
+import { resolveJwtSecret } from '../lib/jwtSecrets.js';
 import { prisma } from '../lib/prisma.js';
 
-const ACCESS_SECRET =
-  process.env.JWT_ACCESS_SECRET ?? 'dev-only-access-secret-change-me-32chars';
-const REFRESH_SECRET =
-  process.env.JWT_REFRESH_SECRET ?? 'dev-only-refresh-secret-change-me-32chars';
+const ACCESS_SECRET = resolveJwtSecret('JWT_ACCESS_SECRET');
+const REFRESH_SECRET = resolveJwtSecret('JWT_REFRESH_SECRET');
 const ACCESS_TTL = (process.env.JWT_ACCESS_TTL ?? '15m') as jwt.SignOptions['expiresIn'];
 const REFRESH_TTL = (process.env.JWT_REFRESH_TTL ?? '7d') as jwt.SignOptions['expiresIn'];
 

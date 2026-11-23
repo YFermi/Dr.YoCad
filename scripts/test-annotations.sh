@@ -204,6 +204,16 @@ else
   step_fail "10. Cross-org share scoping" "token=${QA_SHARE:-none} read=${CROSS_FILE_STATUS} mint=${CROSS_MINT_STATUS}"
 fi
 
+# 11. JWT fail-closed: loading the auth module in production without secrets must throw
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+FAILCLOSED_OUT=$(cd "${REPO_ROOT}" && env -u JWT_ACCESS_SECRET -u JWT_REFRESH_SECRET NODE_ENV=production \
+  node_modules/.bin/tsx -e "import('./apps/api/src/middleware/auth.ts').then(() => process.exit(0), (e) => { console.error(e.message); process.exit(3); })" 2>&1; echo "exit=$?")
+if echo "${FAILCLOSED_OUT}" | grep -q "exit=3" && echo "${FAILCLOSED_OUT}" | grep -q "JWT_ACCESS_SECRET is not set"; then
+  step_pass "11. Auth module refuses to load in production without JWT secrets"
+else
+  step_fail "11. JWT fail-closed" "${FAILCLOSED_OUT}"
+fi
+
 echo "------------------------------------------------------------"
 echo "Summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 [ "${FAIL_COUNT}" -eq 0 ]
