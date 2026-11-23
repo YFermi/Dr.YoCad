@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch --import ./scripts/load-env.mjs src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node --import ./scripts/load-env.mjs dist/server.js",
+    "start": "node --conditions=production --import ./scripts/load-env.mjs dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "prisma": "node --import ./scripts/load-env.mjs node_modules/prisma/build/index.js",
     "seed": "tsx --import ./scripts/load-env.mjs prisma/seed.ts"

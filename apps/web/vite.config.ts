@@ -8,6 +8,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),
+      // Bundle shared from source so the web build never depends on packages/shared/dist.
+      '@cadline/shared': path.resolve(import.meta.dirname, '../../packages/shared/src/index.ts'),
     },
   },
   server: {
