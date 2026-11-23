@@ -37,19 +37,19 @@ jobs:
         run: docker compose up -d --wait --wait-timeout 180
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: bash scripts/ci/run-step.sh install pnpm install --frozen-lockfile
 
       - name: Prisma migrate deploy
-        run: pnpm --filter api prisma migrate deploy
+        run: bash scripts/ci/run-step.sh migrate pnpm --filter api prisma migrate deploy
 
       - name: Seed
-        run: pnpm --filter api seed
+        run: bash scripts/ci/run-step.sh seed pnpm --filter api seed
 
       - name: Typecheck (all workspaces)
-        run: pnpm -r typecheck
+        run: bash scripts/ci/run-step.sh typecheck pnpm -r typecheck
 
       - name: Build (all workspaces)
-        run: pnpm -r build
+        run: bash scripts/ci/run-step.sh build pnpm -r build
 
       - name: Start API (compiled)
         run: |
@@ -60,10 +60,12 @@ jobs:
             fi
             sleep 1
           done
-          echo "API did not become healthy"; cat api.log; exit 1
+          echo "API did not become healthy"; cat api.log
+          echo "::error title=API start failed::$(tail -n 40 api.log | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"}{print}')"
+          exit 1
 
       - name: Run all 7 suites
-        run: bash scripts/test-all.sh
+        run: bash scripts/ci/run-step.sh test-all bash scripts/test-all.sh
 
       - name: API log
         if: always()

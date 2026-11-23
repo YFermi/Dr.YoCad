@@ -69,10 +69,18 @@ run_suite() {
   local name="$1"; shift
   echo
   echo "================ ${name} ================"
-  "$@"
-  local code=$?
+  local log
+  log="$(mktemp)"
+  "$@" 2>&1 | tee "${log}"
+  local code=${PIPESTATUS[0]}
   NAMES+=("${name}")
   CODES+=("${code}")
+  # In GitHub Actions, surface each failing suite's tail as an annotation.
+  if [ "${code}" -ne 0 ] && [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    echo "::error title=${name} failed (exit ${code})::$(tail -n 40 "${log}" | tail -c 5000 |
+      sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN { ORS = "%0A" } { print }')"
+  fi
+  rm -f "${log}"
 }
 
 run_suite "geometry unit tests" node_modules/.bin/tsx --test apps/web/src/lib/geometry/cylinders.test.ts apps/web/src/lib/geometry/edgeLoops.test.ts apps/web/src/lib/geometry/measurements.test.ts apps/web/src/lib/geometry/planarRegions.test.ts
