@@ -233,7 +233,7 @@ export const initFileUploadRequestSchema = z.object({
   chunkSize: z
     .number()
     .int()
-    .min(64 * 1024)
+    .min(DEFAULT_CHUNK_SIZE, "chunkSize must be at least 5 MiB (S3 minimum part size)")
     .max(50 * 1024 * 1024)
     .default(DEFAULT_CHUNK_SIZE),
 });
