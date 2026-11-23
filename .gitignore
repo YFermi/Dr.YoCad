@@ -24,3 +24,6 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# STANDALONE mode data (SQLite db + uploaded files), see STANDALONE.md
+/data/

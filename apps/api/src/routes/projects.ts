@@ -9,6 +9,7 @@ import {
   type ActivityLogWithAuthor,
 } from '@cadline/shared';
 import { prisma } from '../lib/prisma.js';
+import { STANDALONE } from '../lib/standalone.js';
 import { authenticate, requirePermission } from '../middleware/auth.js';
 
 function serializeProject(project: {
@@ -42,10 +43,17 @@ export async function projectRoutes(fastify: FastifyInstance): Promise<void> {
       organizationId: authUser.organizationId,
       ...(query.search
         ? {
-            OR: [
-              { name: { contains: query.search, mode: 'insensitive' as const } },
-              { description: { contains: query.search, mode: 'insensitive' as const } },
-            ],
+            // SQLite (STANDALONE) has no `mode` filter; its LIKE is already
+            // case-insensitive for ASCII.
+            OR: STANDALONE
+              ? [
+                  { name: { contains: query.search } },
+                  { description: { contains: query.search } },
+                ]
+              : [
+                  { name: { contains: query.search, mode: 'insensitive' as const } },
+                  { description: { contains: query.search, mode: 'insensitive' as const } },
+                ],
           }
         : {}),
     };
