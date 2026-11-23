@@ -1,0 +1,6 @@
+{
+  "name": "Cadline — 2D/3D Design Review Platform",
+  "description": "Browser-based 2D/3D CAD design review and collaboration platform with workspace management, chunked file uploads, share links, and viewer shell.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

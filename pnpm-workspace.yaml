@@ -1,0 +1,15 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'scripts'
+minimumReleaseAgeExclude:
+  - '@tanstack/query-core@5.108.1'
+  - '@tanstack/react-query@5.108.1'
+allowBuilds:
+  '@google/genai': true
+  '@prisma/client': true
+  '@prisma/engines': true
+  esbuild: true
+  prisma: true
+  protobufjs: true
+

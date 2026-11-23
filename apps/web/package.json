@@ -1,0 +1,44 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --port 5173",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:geometry": "tsx --test src/lib/geometry/*.test.ts"
+  },
+  "dependencies": {
+    "@cadline/shared": "workspace:*",
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.2",
+    "@tanstack/react-query": "^5.108.1",
+    "clsx": "^2.1.1",
+    "konva": "^10.9.1",
+    "lucide-react": "^0.546.0",
+    "pdfjs-dist": "^6.5.438",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "react-konva": "^19.3.2",
+    "react-router-dom": "^7.18.6",
+    "socket.io-client": "^4.8.4",
+    "tailwind-merge": "^3.7.0",
+    "three": "^0.187.0",
+    "three-mesh-bvh": "^0.9.18",
+    "three-stdlib": "^2.36.1",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.187.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}
