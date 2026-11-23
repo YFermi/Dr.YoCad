@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import Fastify from 'fastify';
+import Fastify, { type FastifyError } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
@@ -90,7 +90,7 @@ async function buildServer() {
     routePrefix: '/docs',
   });
 
-  fastify.setErrorHandler((error, _request, reply) => {
+  fastify.setErrorHandler((error: FastifyError, _request, reply) => {
     if (error instanceof ZodError) {
       return reply.status(400).send({
         success: false,

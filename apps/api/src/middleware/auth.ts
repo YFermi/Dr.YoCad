@@ -14,6 +14,8 @@ export interface AccessTokenPayload {
   sub: string;
   orgId: string;
   email: string;
+  /** Display name; optional so tokens issued before it was added still verify. */
+  name?: string;
   role: UserRole;
   type: 'access';
 }
@@ -28,6 +30,7 @@ export interface AuthenticatedUser {
   id: string;
   organizationId: string;
   email: string;
+  name: string;
   role: UserRole;
 }
 
@@ -42,12 +45,14 @@ export function signAccessToken(user: {
   id: string;
   organizationId: string;
   email: string;
+  name: string;
   role: UserRole;
 }): string {
   const payload: AccessTokenPayload = {
     sub: user.id,
     orgId: user.organizationId,
     email: user.email,
+    name: user.name,
     role: user.role,
     type: 'access',
   };
@@ -133,6 +138,7 @@ export async function authenticate(
       id: payload.sub,
       organizationId: payload.orgId,
       email: payload.email,
+      name: payload.name ?? payload.email.split('@')[0] ?? 'Reviewer',
       role: payload.role,
     };
     request.effectivePermission = roleToPermission(payload.role);
@@ -209,7 +215,8 @@ export function requirePermission(requiredLevel: SharePermission) {
 
     if (authHeader?.startsWith('Bearer ')) {
       const authResult = await authenticate(request, reply);
-      if (authResult || reply.sent || !request.effectivePermission) {
+      // authenticate() only returns a value after sending a 401, so reply.sent covers it.
+      if (reply.sent || !request.effectivePermission) {
         return authResult;
       }
 

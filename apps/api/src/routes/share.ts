@@ -136,7 +136,7 @@ export async function shareRoutes(fastify: FastifyInstance): Promise<void> {
           createdById: shareLink.createdById,
           permission: shareLink.permission as SharePermission,
           expiresAt: shareLink.expiresAt?.toISOString() ?? null,
-          revokedAt: shareLink.revokedAt?.toISOString() ?? null,
+          revokedAt: null, // revoked links return 404 above
           createdAt: shareLink.createdAt.toISOString(),
           updatedAt: shareLink.updatedAt.toISOString(),
         },

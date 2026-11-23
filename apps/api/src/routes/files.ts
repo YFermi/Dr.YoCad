@@ -138,6 +138,20 @@ async function resolveFileVersionWithJob(
   return { file, version };
 }
 
+const ERROR_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    success: { type: 'boolean' },
+    error: {
+      type: 'object',
+      properties: {
+        code: { type: 'string' },
+        message: { type: 'string' },
+      },
+    },
+  },
+} as const;
+
 export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post(
     '/init',
@@ -693,19 +707,8 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
               },
             },
           },
-          422: {
-            type: 'object',
-            properties: {
-              success: { type: 'boolean' },
-              error: {
-                type: 'object',
-                properties: {
-                  code: { type: 'string' },
-                  message: { type: 'string' },
-                },
-              },
-            },
-          },
+          404: ERROR_RESPONSE_SCHEMA,
+          422: ERROR_RESPONSE_SCHEMA,
         },
       },
     },
@@ -852,6 +855,8 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
               },
             },
           },
+          400: ERROR_RESPONSE_SCHEMA,
+          404: ERROR_RESPONSE_SCHEMA,
         },
       },
     },
