@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "cadline-dev",
+      "credentials": [
+        {
+          "accessKey": "cadline",
+          "secretKey": "cadline_dev_s3_secret"
+        }
+      ],
+      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+    }
+  ]
+}
