@@ -30,7 +30,6 @@ import {
   deleteStorageObject,
   downloadObjectBuffer,
   getObjectStream,
-  getPresignedGetUrl,
   getPresignedPartUrl,
   initMultipartUpload,
   uploadMultipartChunk,
@@ -1020,14 +1019,43 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      const url = await getPresignedGetUrl(pageKey, 900);
+      // Same-origin signed path (see /:id/glb): <img src> cannot send auth headers
+      // and must not depend on bucket CORS.
       return reply.send({
         success: true,
         data: {
-          url,
+          url: signedAssetPath('page', resolved.file.id, resolved.version.id, params.n),
           page: params.n,
         },
       });
+    }
+  );
+
+  fastify.get(
+    '/:id/2d/page-image/:n',
+    { preHandler: [signedAssetGuard('page')] },
+    async (request, reply) => {
+      const params = file2DPageParamsSchema.parse(request.params);
+      const resolved = await resolveAssetVersion(request, params.id);
+      const job = resolved?.version.conversionJob;
+      const manifest = (job?.mode === '2D_PDF' ? job.pageManifest : null) as unknown as
+        | PdfPageManifest
+        | null;
+      const pageKey = manifest?.pageKeys?.[params.n - 1];
+      if (!resolved || !pageKey) {
+        return reply.status(404).send({
+          success: false,
+          error: { code: 'PAGE_NOT_FOUND', message: 'PDF page image not found' },
+        });
+      }
+
+      const object = await getObjectStream(pageKey);
+      reply.header('Content-Type', 'image/png');
+      reply.header('Cache-Control', 'private, max-age=300');
+      if (object.contentLength !== undefined) {
+        reply.header('Content-Length', String(object.contentLength));
+      }
+      return reply.send(object.body);
     }
   );
 
