@@ -22,6 +22,11 @@ export const s3Client = new S3Client({
     accessKeyId: process.env.S3_ACCESS_KEY ?? 'cadline',
     secretAccessKey: process.env.S3_SECRET_KEY ?? 'cadline_dev_s3_secret',
   },
+  // SDK default (WHEN_SUPPORTED) bakes a CRC32 of an *empty* body into presigned
+  // UploadPart URLs, so every client PUT of real bytes fails with BadDigest.
+  // Only add checksums when an operation requires them.
+  requestChecksumCalculation: 'WHEN_REQUIRED',
+  responseChecksumValidation: 'WHEN_REQUIRED',
 });
 
 export async function ensureBucket(): Promise<void> {
