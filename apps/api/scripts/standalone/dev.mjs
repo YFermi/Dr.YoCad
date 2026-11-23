@@ -12,6 +12,9 @@ const apiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..
 process.env.STANDALONE = 'true';
 process.env.NODE_ENV ??= 'development';
 process.env.LOG_LEVEL ??= 'warn';
+// No auth in STANDALONE: listen on loopback only (Fastify binds every address
+// 'localhost' resolves to, IPv4 and IPv6), not on all interfaces like full mode.
+process.env.API_HOST ??= 'localhost';
 // Auth is bypassed in STANDALONE, but the JWT module still wants signing keys;
 // per-process random ones avoid the "ephemeral secret" warning noise.
 process.env.JWT_ACCESS_SECRET ??= crypto.randomBytes(32).toString('hex');
