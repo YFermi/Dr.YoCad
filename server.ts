@@ -762,6 +762,29 @@ function authenticate(req: AuthedRequest, res: Response, next: NextFunction): vo
   }
 }
 
+/**
+ * True when a share link's scope (fileId or projectId) covers the file/project
+ * targeted by the request's route params. Fails closed when no target resolves.
+ */
+function shareLinkCoversRequest(link: ShareLink, req: Request): boolean {
+  const params = (req.params ?? {}) as Record<string, string | undefined>;
+  const routePath = typeof req.route?.path === 'string' ? req.route.path : req.path;
+  const fileId =
+    params.fileId || (routePath.includes('/files/') ? params.id : undefined) || undefined;
+  const projectId =
+    params.projectId || (routePath.includes('/projects/') ? params.id : undefined) || undefined;
+
+  if (fileId) {
+    if (link.fileId) return link.fileId === fileId;
+    if (link.projectId) return files.get(fileId)?.projectId === link.projectId;
+    return false;
+  }
+  if (projectId) {
+    return Boolean(link.projectId) && link.projectId === projectId;
+  }
+  return false;
+}
+
 function requirePermission(requiredLevel: SharePermission) {
   return (req: AuthedRequest, res: Response, next: NextFunction): void => {
     const authHeader = req.headers.authorization;
@@ -803,6 +826,16 @@ function requirePermission(requiredLevel: SharePermission) {
             code: 'INVALID_SHARE_TOKEN',
             message: 'Share link is invalid or expired',
           },
+        });
+        return;
+      }
+
+      // Scope check: the link only covers its own file/project. 404 on mismatch
+      // so callers cannot probe for resources outside the link's scope.
+      if (!shareLinkCoversRequest(link, req)) {
+        res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Resource not found' },
         });
         return;
       }
@@ -2106,6 +2139,20 @@ async function startServer() {
     (req: AuthedRequest, res, next) => {
       try {
         const body = createShareLinkRequestSchema.parse(req.body);
+        const orgId = req.authUser?.organizationId;
+        const ownsProject = (projectId: string | undefined) =>
+          Boolean(projectId && orgId && projects.get(projectId)?.organizationId === orgId);
+        if (
+          !orgId ||
+          (body.fileId && !ownsProject(files.get(body.fileId)?.projectId)) ||
+          (body.projectId && !ownsProject(body.projectId))
+        ) {
+          res.status(404).json({
+            success: false,
+            error: { code: 'NOT_FOUND', message: 'Resource not found' },
+          });
+          return;
+        }
         const now = new Date().toISOString();
         const token = crypto.randomBytes(18).toString('base64url');
         const expiresAt = body.expiresInHours

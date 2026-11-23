@@ -146,6 +146,55 @@ export async function authenticate(
 }
 
 /**
+ * Resolves the file / project a request targets from its route params.
+ * File routes use `/files/:id/...` or `/files/:fileId/...`; project routes use
+ * `/projects/:id/...`.
+ */
+function resolveShareTarget(request: FastifyRequest): {
+  fileId?: string;
+  projectId?: string;
+} {
+  const params = (request.params ?? {}) as Record<string, unknown>;
+  const routeUrl = request.routeOptions?.url ?? request.url;
+  const pick = (key: string): string | undefined =>
+    typeof params[key] === 'string' && params[key] ? (params[key] as string) : undefined;
+
+  const fileId = pick('fileId') ?? (routeUrl.includes('/files/') ? pick('id') : undefined);
+  const projectId =
+    pick('projectId') ?? (routeUrl.includes('/projects/') ? pick('id') : undefined);
+  return { fileId, projectId };
+}
+
+/**
+ * True when the share link's scope (fileId or projectId) covers the requested
+ * resource. Fails closed: requests whose target cannot be resolved are denied.
+ */
+async function shareLinkCoversRequest(
+  link: { fileId: string | null; projectId: string | null },
+  request: FastifyRequest
+): Promise<boolean> {
+  const target = resolveShareTarget(request);
+
+  if (target.fileId) {
+    if (link.fileId) return link.fileId === target.fileId;
+    if (link.projectId) {
+      const file = await prisma.file.findUnique({
+        where: { id: target.fileId },
+        select: { projectId: true },
+      });
+      return file?.projectId === link.projectId;
+    }
+    return false;
+  }
+
+  if (target.projectId) {
+    return Boolean(link.projectId) && link.projectId === target.projectId;
+  }
+
+  return false;
+}
+
+/**
  * Verifies that the caller satisfies the required SharePermission level via
  * either an authenticated JWT user role or a valid share link token header.
  */
@@ -190,6 +239,16 @@ export function requirePermission(requiredLevel: SharePermission) {
             code: 'INVALID_SHARE_TOKEN',
             message: 'Share link is invalid or expired',
           },
+        });
+      }
+
+      // Scope check: a share link only grants access to the file or project it
+      // was created for. Mismatches return 404 so callers cannot probe for the
+      // existence of resources outside the link's scope.
+      if (!(await shareLinkCoversRequest(link, request))) {
+        return reply.status(404).send({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Resource not found' },
         });
       }
 

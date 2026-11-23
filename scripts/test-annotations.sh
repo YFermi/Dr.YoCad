@@ -187,6 +187,23 @@ else
   step_fail "9. DELETE cleanup" "${DEL_MEAS} | ${DEL_ANN}"
 fi
 
+# 10. Share-token scoping: a link minted in another org (the QA org from step 1)
+#     must not open the demo org's file, and minting a link for it must fail.
+QA_TOKEN=$(echo "${REG_RESP}" | json_get 'data.data.tokens.accessToken' 2>/dev/null || true)
+QA_PROJ_ID=$(curl -sS -X POST "${API_URL}/projects" -H "Authorization: Bearer ${QA_TOKEN}" \
+  -H "Content-Type: application/json" -d '{"name":"QA Scope Project"}' | json_get 'data.data.id' 2>/dev/null || true)
+QA_SHARE=$(curl -sS -X POST "${API_URL}/share" -H "Authorization: Bearer ${QA_TOKEN}" \
+  -H "Content-Type: application/json" -d "{\"projectId\":\"${QA_PROJ_ID}\",\"permission\":\"VIEW\"}" \
+  | json_get 'data.data.token' 2>/dev/null || true)
+CROSS_FILE_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' "${API_URL}/files/${FILE_ID}" -H "x-share-token: ${QA_SHARE}")
+CROSS_MINT_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${API_URL}/share" -H "Authorization: Bearer ${QA_TOKEN}" \
+  -H "Content-Type: application/json" -d "{\"fileId\":\"${FILE_ID}\",\"permission\":\"VIEW\"}")
+if [ -n "${QA_SHARE}" ] && [ "${CROSS_FILE_STATUS}" = "404" ] && [ "${CROSS_MINT_STATUS}" = "404" ]; then
+  step_pass "10. Cross-org share token gets 404 on /files/${FILE_ID}; cross-org link mint gets 404"
+else
+  step_fail "10. Cross-org share scoping" "token=${QA_SHARE:-none} read=${CROSS_FILE_STATUS} mint=${CROSS_MINT_STATUS}"
+fi
+
 echo "------------------------------------------------------------"
 echo "Summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 [ "${FAIL_COUNT}" -eq 0 ]
