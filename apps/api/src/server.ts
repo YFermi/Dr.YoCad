@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import Fastify, { type FastifyError } from 'fastify';
+import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from 'fastify';
+import { HeadBucketCommand } from '@aws-sdk/client-s3';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
@@ -10,7 +11,7 @@ import { ZodError } from 'zod';
 import { MAX_UPLOAD_BYTES } from '@cadline/shared';
 import { prisma } from './lib/prisma.js';
 import { connectRedis, redis } from './lib/redis.js';
-import { ensureBucket } from './lib/s3.js';
+import { ensureBucket, s3Client, S3_BUCKET } from './lib/s3.js';
 import { registerSocketPlugin } from './plugins/socket.js';
 import { aiRoutes } from './routes/ai.js';
 import { annotationRoutes } from './routes/annotations.js';
@@ -124,15 +125,36 @@ async function buildServer() {
     });
   });
 
-  fastify.get('/health', async (_request, reply) => {
-    return reply.send({
-      success: true,
+  // Liveness + dependency readiness. `/api/v1/health` is the path the web client,
+  // scripts and CI use (same as the former mock server); `/health` is kept for
+  // existing probes. Returns 503 if Postgres, Redis or the S3 bucket is unreachable.
+  const healthHandler = async (_request: FastifyRequest, reply: FastifyReply) => {
+    const check = async (fn: () => Promise<unknown>) => {
+      try {
+        await fn();
+        return 'ok' as const;
+      } catch {
+        return 'down' as const;
+      }
+    };
+    const [database, redisStatus, storage] = await Promise.all([
+      check(() => prisma.$queryRaw`SELECT 1`),
+      check(() => redis.ping()),
+      check(() => s3Client.send(new HeadBucketCommand({ Bucket: S3_BUCKET }))),
+    ]);
+    const checks = { database, redis: redisStatus, storage };
+    const healthy = Object.values(checks).every((v) => v === 'ok');
+    return reply.status(healthy ? 200 : 503).send({
+      success: healthy,
       data: {
-        status: 'ok',
+        status: healthy ? 'ok' : 'degraded',
         timestamp: new Date().toISOString(),
+        checks,
       },
     });
-  });
+  };
+  fastify.get('/health', healthHandler);
+  fastify.get('/api/v1/health', healthHandler);
 
   await fastify.register(authRoutes, { prefix: '/api/v1/auth' });
   await fastify.register(projectRoutes, { prefix: '/api/v1/projects' });
