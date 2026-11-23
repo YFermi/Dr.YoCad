@@ -214,6 +214,12 @@ export const fileVersionQuerySchema = z.object({
   versionId: z.string().min(1).optional(),
 });
 
+/** Query for binary asset routes (glb-binary, 2d/page-image): signed link or normal auth. */
+export const signedAssetQuerySchema = fileVersionQuerySchema.extend({
+  exp: z.coerce.number().int().positive().optional(),
+  sig: z.string().min(1).max(128).optional(),
+});
+
 export const initFileUploadRequestSchema = z.object({
   projectId: z.string().min(1),
   folderId: z.string().min(1).nullable().optional(),
@@ -227,7 +233,7 @@ export const initFileUploadRequestSchema = z.object({
   chunkSize: z
     .number()
     .int()
-    .min(64 * 1024)
+    .min(DEFAULT_CHUNK_SIZE, "chunkSize must be at least 5 MiB (S3 minimum part size)")
     .max(50 * 1024 * 1024)
     .default(DEFAULT_CHUNK_SIZE),
 });

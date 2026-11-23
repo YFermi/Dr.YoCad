@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { PERMISSION_RANK, SharePermission, UserRole } from '@cadline/shared';
 import { resolveJwtSecret } from '../lib/jwtSecrets.js';
 import { prisma } from '../lib/prisma.js';
+import { LOCAL_USER, STANDALONE } from '../lib/standalone.js';
 
 const ACCESS_SECRET = resolveJwtSecret('JWT_ACCESS_SECRET');
 const REFRESH_SECRET = resolveJwtSecret('JWT_REFRESH_SECRET');
@@ -14,6 +15,8 @@ export interface AccessTokenPayload {
   sub: string;
   orgId: string;
   email: string;
+  /** Display name; optional so tokens issued before it was added still verify. */
+  name?: string;
   role: UserRole;
   type: 'access';
 }
@@ -28,6 +31,7 @@ export interface AuthenticatedUser {
   id: string;
   organizationId: string;
   email: string;
+  name: string;
   role: UserRole;
 }
 
@@ -42,12 +46,14 @@ export function signAccessToken(user: {
   id: string;
   organizationId: string;
   email: string;
+  name: string;
   role: UserRole;
 }): string {
   const payload: AccessTokenPayload = {
     sub: user.id,
     orgId: user.organizationId,
     email: user.email,
+    name: user.name,
     role: user.role,
     type: 'access',
   };
@@ -96,6 +102,50 @@ export function verifyRefreshToken(token: string): RefreshTokenPayload {
   return decoded;
 }
 
+/**
+ * Short-lived signed URLs for binary assets (converted GLB, PDF page PNGs).
+ * Browsers load these through <img src> / GLTFLoader, which cannot attach an
+ * Authorization header, so the URL itself carries an HMAC over
+ * (kind, fileId, versionId, extra, exp). Domain-separated from JWT signing.
+ */
+export function signAssetParams(
+  kind: 'glb' | 'page',
+  fileId: string,
+  versionId: string,
+  extra: string,
+  ttlSeconds: number
+): { exp: number; sig: string } {
+  const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  return { exp, sig: assetSignature(kind, fileId, versionId, extra, exp) };
+}
+
+export function verifyAssetParams(
+  kind: 'glb' | 'page',
+  fileId: string,
+  versionId: string,
+  extra: string,
+  exp: number,
+  sig: string
+): boolean {
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false;
+  const expected = Buffer.from(assetSignature(kind, fileId, versionId, extra, exp));
+  const given = Buffer.from(sig);
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given);
+}
+
+function assetSignature(
+  kind: string,
+  fileId: string,
+  versionId: string,
+  extra: string,
+  exp: number
+): string {
+  return crypto
+    .createHmac('sha256', ACCESS_SECRET)
+    .update(`cadline-asset-v1|${kind}|${fileId}|${versionId}|${extra}|${exp}`)
+    .digest('base64url');
+}
+
 export function hashToken(raw: string): string {
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
@@ -113,10 +163,30 @@ export function roleToPermission(role: UserRole): SharePermission {
   }
 }
 
+/**
+ * STANDALONE only (STANDALONE=true, never with NODE_ENV=production): every
+ * request runs as the fixed local OWNER. See STANDALONE.md.
+ */
+function applyStandaloneUser(request: FastifyRequest): void {
+  request.authUser = {
+    id: LOCAL_USER.id,
+    organizationId: LOCAL_USER.organizationId,
+    email: LOCAL_USER.email,
+    name: LOCAL_USER.name,
+    role: UserRole.OWNER,
+  };
+  request.effectivePermission = SharePermission.ADMIN;
+}
+
 export async function authenticate(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<FastifyReply | void> {
+  if (STANDALONE) {
+    applyStandaloneUser(request);
+    return;
+  }
+
   const header = request.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
     return reply.status(401).send({
@@ -133,6 +203,7 @@ export async function authenticate(
       id: payload.sub,
       organizationId: payload.orgId,
       email: payload.email,
+      name: payload.name ?? payload.email.split('@')[0] ?? 'Reviewer',
       role: payload.role,
     };
     request.effectivePermission = roleToPermission(payload.role);
@@ -202,6 +273,11 @@ export function requirePermission(requiredLevel: SharePermission) {
     request: FastifyRequest,
     reply: FastifyReply
   ): Promise<FastifyReply | void> {
+    if (STANDALONE) {
+      applyStandaloneUser(request);
+      return;
+    }
+
     const authHeader = request.headers.authorization;
     const shareTokenHeader = request.headers['x-share-token'];
     const shareToken =
@@ -209,7 +285,8 @@ export function requirePermission(requiredLevel: SharePermission) {
 
     if (authHeader?.startsWith('Bearer ')) {
       const authResult = await authenticate(request, reply);
-      if (authResult || reply.sent || !request.effectivePermission) {
+      // authenticate() only returns a value after sending a 401, so reply.sent covers it.
+      if (reply.sent || !request.effectivePermission) {
         return authResult;
       }
 

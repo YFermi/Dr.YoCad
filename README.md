@@ -1,143 +1,99 @@
 # Cadline — Browser-Based 2D/3D Design Review Platform
 
-Monorepo foundation and interactive 3D CAD viewer for an eDrawings-style design review and collaboration application.
+Design review for CAD files in the browser: 3D models (STEP/IGES/BREP via OpenCASCADE, STL, OBJ, GLB/glTF), 2D drawings (DXF, PDF), annotations, threaded comments, measurements, real-time collaboration, and an optional AI assistant.
+
+## Quick start
+
+```bash
+git clone https://github.com/YFermi/Dr.YoCad.git && cd Dr.YoCad
+npm install
+npm run dev:standalone
+open http://localhost:5173
+```
 
 ## Stack
 
-- **Monorepo**: `pnpm` workspaces (`apps/web`, `apps/api`, `packages/shared`)
-- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, minimal shadcn-style UI primitives, React Router, Zustand, TanStack Query, Three.js, `@react-three/fiber`, `@react-three/drei`
-- **Backend**: Fastify, TypeScript, Prisma, PostgreSQL 16, Redis 7, Socket.IO, `occt-import-js`, `@gltf-transform/core`
-- **Object Storage**: S3-compatible (MinIO in development, AWS S3 in production) via `@aws-sdk/client-s3`
-- **Auth**: JWT access + rotating refresh tokens, bcrypt passwords, per-route rate limits, OAuth provider stubs
+- **Monorepo**: pnpm workspaces: `apps/api`, `apps/web`, `packages/shared`, `scripts`. Requires Node 20.19+ (or 22.12+). `npm install` installs the workspace with the pinned pnpm via `npx`, so no global pnpm is needed.
+- **API** (`apps/api`, port 4000): Fastify 5, Prisma 6, Socket.IO, `occt-import-js`, `@gltf-transform/core`, optional Gemini (`@google/genai`)
+- **Web** (`apps/web`, port 5173): React 19, Vite, Tailwind CSS 4, Three.js (`@react-three/fiber`, `three-mesh-bvh`), Konva, TanStack Query, Zustand
+- **Shared** (`packages/shared`): zod 3 schemas and TypeScript types used by both apps
 
-## Quick Start
+There is one backend: `apps/api`. The web dev server proxies `/api` and `/socket.io` to it. It runs in one of two modes:
 
-1. Copy environment variables:
+| | `npm run dev:standalone` | Full stack (below) |
+| :--- | :--- | :--- |
+| Database | SQLite at `./data/cadline.db` | PostgreSQL 16 |
+| Files | `./data/files/` | S3-compatible storage |
+| Presence cache | in memory | Redis 7 |
+| Auth | none: everyone is the local user "Local Dev" | JWT login |
+| For | local development and demos | anything shared or deployed |
+
+STANDALONE mode is single-user and has no security. See [STANDALONE.md](STANDALONE.md) for what it changes, how to reset its data, and how to switch back.
+
+Smoke test, no services needed: `bash scripts/test-standalone.sh`. It starts `npm run dev:standalone` (or reuses one already on :4000), creates annotations and uploads an STL without any auth header, and checks that the converted GLB lands in `./data/files/`.
+
+## Full stack (advanced)
+
+**Optional.** You only need this to work on or test auth, multi-user behavior, Postgres, Redis or S3. It requires Docker and pnpm (`corepack enable`, or `npx pnpm@12.21.0` in place of `pnpm`).
 
 ```bash
-cp .env.example .env
-```
-
-2. Install all workspace dependencies:
-
-```bash
+docker compose up -d                      # postgres :5432, redis :6379, S3 :9000
 pnpm install
+pnpm --filter api prisma migrate deploy   # create the schema
+pnpm --filter api seed                    # demo org, users, project, sample files
+pnpm dev                                  # API on :4000 + web on :5173
 ```
 
-3. Start PostgreSQL 16, Redis 7, and MinIO:
-
-```bash
-docker compose up -d
-```
-
-4. Configure MinIO CORS so browsers can `PUT` directly to presigned URLs and read `ETag`:
-
-```bash
-chmod +x scripts/setup-minio-cors.sh
-./scripts/setup-minio-cors.sh
-```
-
-5. Run Prisma database migrations:
-
-```bash
-pnpm --filter api prisma migrate dev
-```
-
-6. Seed the demo organization, users, project, and sample STEP/STL models (uploads to MinIO and queues conversion jobs):
-
-```bash
-pnpm --filter api seed
-```
-
-7. Start both the Fastify API (`http://localhost:4000`, Swagger at `/docs`) and the React web app (`http://localhost:5173`):
-
-```bash
-pnpm dev
-```
-
-### Seeded Demo Credentials
+Open <http://localhost:5173> and sign in:
 
 | Role | Email | Password |
 | :--- | :--- | :--- |
 | Admin | `admin@demo.local` | `Password123!` |
 | Member | `user@demo.local` | `Password123!` |
 
-## Session 2 — How to Test the Viewer End-to-End
+The seed uploads `scripts/seed-models/*` (STEP cube, STL cube, DXF plate, PDF sheet) and queues their conversion. The API's conversion worker processes them once `pnpm dev` is running; they show **READY** within a few seconds. Object storage is any S3-compatible service; docker compose and CI use [SeaweedFS](https://github.com/seaweedfs/seaweedfs)'s S3 gateway, because MinIO's community images are no longer distributed.
 
-1. Run `docker compose up -d`, `./scripts/setup-minio-cors.sh`, `pnpm --filter api prisma migrate dev`, `pnpm --filter api seed`, and `pnpm dev`.
-2. Watch the API terminal for `[conversion-worker] Completed job=...` confirming that both `calibration-cube-50mm.step` (via `occt-import-js`) and `calibration-cube-50mm.stl` converted to `.converted.glb` in MinIO.
-3. Open `http://localhost:5173/login`, sign in with `admin@demo.local` / `Password123!`, and click **Planetary Gearbox Assembly**.
-4. Click `calibration-cube-50mm.step` to open `/files/:id` — the 3D viewport auto-fits the 50 mm cube, loads the part tree on the left, and displays the floating bottom toolbar.
-5. Test the viewer tools:
-   - Toggle **Part tree** checkboxes or click isolate on a node.
-   - Cycle shading modes (**Shaded → Edges → Wireframe → X-Ray**).
-   - Enable **Section** in the bottom toolbar, switch X/Y/Z axis, and drag the offset slider to slice the geometry.
-   - Enable **Measure (Distance)** and click two opposite vertices/faces on the 50 mm cube to read the `~50.00 mm` callout.
-   - Click **Screenshot** to download a PNG of the viewport.
-6. Upload `scripts/seed-models/cube-50mm.stl` (or any `.step` / `.stl` / `.obj` / `.glb`) through the Project Detail dropzone to test direct-to-MinIO presigned `PUT` chunk upload → `PROCESSING` status polling → automatic transition into the 3D viewer.
+### Configuration
 
-## Session 4 — 2D Drawing Viewer & Markup
+API scripts load configuration in this order (first wins): the real environment, `apps/api/.env`, `./.env`, then `./.env.example` as development defaults. No `.env` file is needed for local development.
 
-Cadline supports 2D engineering drawings in **DXF** (vector scene graph parsed via `dxf-parser` and rendered on Konva with per-layer visibility, soloing, snapping, and viewport culling) and **PDF** (rasterized server-side at 2× scale via `pdfjs-dist` into per-page PNGs with stacked page viewing and markup).
+- `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET`: if unset in development the API generates random per-process secrets (sessions reset on restart) and logs a warning. **With `NODE_ENV=production` the API refuses to start without them.** They are never taken from `.env.example`.
+- `GEMINI_API_KEY`: optional. Without it, AI endpoints return `503 AI_NOT_CONFIGURED` and everything else works.
+- `RATE_LIMIT_MAX`: global per-IP request limit per minute (default 300).
+- `LOG_LEVEL`: Fastify log level (default `debug` in development, `info` in production).
+- `STANDALONE`: leave unset for the full stack. `STANDALONE=true` is STANDALONE mode, and the API refuses to start with it when `NODE_ENV=production`.
 
-### DWG Format Policy (Deliberate Scope & Licensing Decision)
+To persist sessions across restarts: `cp .env.example .env` and set real secrets.
 
-**Native `.dwg` parsing is intentionally not implemented.** DWG is a proprietary Autodesk format, and bundling a native DWG decoder introduces licensing constraints (such as GPL/commercial ODA licensing). When a `.dwg` file is uploaded, the conversion worker marks the job `FAILED` with the explicit guidance:
+### Tests
 
-> *DWG is a proprietary format. Convert to DXF with ODA File Converter or LibreDWG before upload. Free online converters also work.*
-
-To review a DWG drawing in Cadline, convert it to ASCII DXF first using the free [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter) or [LibreDWG](https://www.gnu.org/software/libredwg/), then upload the `.dxf` file.
-
-### Running the Session 4 2D Smoke Test
+With the full stack running (`docker compose up -d`, migrate, seed, and the API on :4000):
 
 ```bash
-API_URL=http://localhost:3000/api/v1 bash scripts/test-2d.sh
+bash scripts/test-all.sh
 ```
 
-## Session 5 — Real-Time Collaboration
+`test-all.sh` waits for `/api/v1/health` and for the seeded files to finish converting, then runs all 7 suites against the Fastify API and exits non-zero if any fail:
 
-Cadline provides live multi-user collaboration across both **3D models** and **2D drawings (DXF/PDF)** via Socket.IO room sync (`file:<id>`):
+| Suite | Covers |
+| :--- | :--- |
+| geometry unit tests (`pnpm --filter web test:geometry`) | planar regions, edge loops, cylinders, measurement math |
+| `test-annotations.sh` | auth, files, annotations, comments, measurements, share-token scoping, JWT fail-closed |
+| `test-2d.sh` | DXF scene, PDF pages, 2D markup and measurements, `NOT_2D` errors |
+| `test-realtime.sh` | Socket.IO presence, deltas, follow mode, rate limits, room authorization |
+| `test-realtime-reconnect.sh` | reconnect and room rejoin |
+| `test-ai.sh` | AI endpoints: `503` without a key, `429` rate limits (live Gemini checks with `AI_TEST_KEY`) |
+| `test-measurements.sh` | upload → OCCT/STL conversion → GLB geometry checks, feature cache, smart measurements |
 
-- **REST persists, Socket.IO broadcasts**: All annotation, comment, and measurement writes go through authenticated REST endpoints first, then broadcast typed `ServerEvent<T>` deltas to room peers (excluding the originating socket via `x-socket-id`). Clients merge deltas directly into the TanStack Query cache without full-list refetches.
-- **Presence & Follow Mode**: Active room participants appear in the top-bar avatar stack with deterministic colors (`hsl(hash % 360, 65%, 55%)`). Clicking an avatar lets you follow that collaborator's 3D camera or 2D pan/zoom/page viewport with smooth `0.15` per-frame lerping. Mutual/cyclic follow loops are rejected server-side.
-- **Live Cursors & Rate Limiting**: 3D surface raycast cursors (screen-space-constant `RingGeometry` rings) and 2D Konva cursors broadcast at up to 20 Hz (`camera:sync` and `viewport:sync` at up to 15 Hz). Server-side per-socket sliding-window rate limits drop floods, emit `rate_limit:error`, and disconnect sustained abuse (5× limit for 10s).
-- **Reconnect & Fallback**: Clients auto-rejoin their active file room on reconnect, reconcile missed updates, and fall back to `POST /api/v1/files/:id/presence/ping` (30s Redis TTL) if WebSockets are temporarily unavailable.
-- **Voice & Video Scope**: Real-time audio/video conferencing is intentionally out of scope (no WebRTC); teams rely on **integration with external tools (Teams/Zoom)** alongside Cadline's shared viewport and follow mode.
+Each suite also runs on its own, e.g. `API_URL=http://localhost:4000/api/v1 bash scripts/test-2d.sh` (`API_URL` defaults to that value). CI (`.github/workflows/ci.yml`) runs typecheck, build, and all suites on every push and pull request.
 
-### Running the Full Regression & Realtime Test Suites
+## Behavior notes
 
-```bash
-API_URL=http://localhost:3000/api/v1 bash scripts/test-annotations.sh
-API_URL=http://localhost:3000/api/v1 bash scripts/test-2d.sh
-API_URL=http://localhost:3000/api/v1 bash scripts/test-realtime.sh
-API_URL=http://localhost:3000/api/v1 bash scripts/test-realtime-reconnect.sh
-API_URL=http://localhost:3000/api/v1 bash scripts/test-ai.sh
-```
+- **Uploads**: `POST /files/init` returns presigned part URLs. The browser PUTs chunks directly to them (the API sets bucket CORS on startup), then calls `POST /files/:id/complete`. `PUT /files/:id/chunk` is an authenticated server-side alternative. In STANDALONE mode the part URLs are signed API routes that write to `./data/files/`.
+- **Model and page delivery**: `GET /files/:id/glb` and `GET /files/:id/2d/page/:n` return short-lived signed same-origin URLs (`/files/:id/glb-binary`, `/files/:id/2d/page-image/:n`). The API streams those from storage, so `<img>` and the glTF loader need no auth headers and no bucket CORS.
+- **Share links** grant access only to the file or project they were created for; other resources return 404. Socket rooms require org membership or a share token covering the file (`auth.shareToken` in the Socket.IO handshake).
+- **DWG** is intentionally unsupported (proprietary format). Convert to DXF with the [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter) or [LibreDWG](https://www.gnu.org/software/libredwg/) first.
+- **AI assistant** (Gemini, server-side only): chat, review summary, BOM extraction and DFM pre-check, grounded in file metadata, annotations, comments and measurements. Context is capped at 50 KB and scoped to the caller's organization; raw model bytes never leave the server. Rate limits: chat 30 / 5 min, summary/BOM/DFM 5 / 10 min per user.
+- **Realtime**: REST persists, Socket.IO broadcasts deltas to the other sockets in the file room. Cursors are limited to 20 Hz and camera/viewport sync to 15 Hz per socket; `POST /files/:id/presence/ping` is the HTTP fallback (30 s TTL). Voice and video are out of scope.
 
-## Session 6 — AI Design Assistant (Optional)
-
-Cadline includes an optional server-side AI Design Assistant powered by Google Gemini (`@google/genai`) with four workflows inside the File Viewer right sidebar:
-
-1. **Contextual Q&A (`POST /api/v1/ai/chat`)** — Answers questions about annotations, discussion threads, recorded measurements, 3D part trees, and 2D drawing layers/notes, returning clickable `#N` annotation references.
-2. **Review Summary (`POST /api/v1/ai/summary`)** — Synthesizes open issues, resolution counts, and recommended next steps. Cached in `AIInsight` (`type: SUMMARY`) until new `ActivityLog` events occur or `?force=true` is requested.
-3. **BOM Extraction (`POST /api/v1/ai/bom`)** — Generates a structured, CSV/TSV-exportable Bill of Materials from 3D assembly part trees or 2D DXF title-block text & layer names.
-4. **DFM Pre-Check (`POST /api/v1/ai/dfm`)** — Runs a transparent, non-geometric manufacturability check grounded strictly in available metadata, recorded measurements, and review annotations.
-
-### Configuration & Data Handling
-
-- **Optional by design**: Set `GEMINI_API_KEY` in the server `.env` file to enable AI endpoints. When omitted, the rest of Cadline continues operating normally and AI endpoints return `503 AI_NOT_CONFIGURED`.
-- **Server-side only**: API keys are never exposed to the browser, and raw model bytes (`.step`, `.glb`, `.pdf` PNGs, raw DXF vector geometry) never leave the server. Context sent to Gemini is strictly capped at **50 KB**.
-- **Per-user rate limits**: `/api/v1/ai/chat` is limited to **30 requests / 5 min**; `/summary`, `/bom`, and `/dfm` are limited to **5 requests / 10 min** (`429 AI_RATE_LIMIT` with `retryAfterSeconds`).
-
-### Running the AI Test Suite
-
-```bash
-# Default CI mode (verifies 503 AI_NOT_CONFIGURED + 429 rate-limit enforcement without an API key)
-API_URL=http://localhost:3000/api/v1 bash scripts/test-ai.sh
-
-# Opt-in live Gemini verification
-AI_TEST_KEY=your_key_here API_URL=http://localhost:3000/api/v1 bash scripts/test-ai.sh
-```
-
-
-
+API docs (Swagger UI): <http://localhost:4000/docs>

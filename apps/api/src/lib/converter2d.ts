@@ -368,7 +368,9 @@ export function parseDxfBufferToScene(input: Buffer | string): {
   bounds: DxfBounds;
 } {
   const text = typeof input === 'string' ? input : input.toString('utf8');
-  const parser = new DxfParser();
+  // dxf-parser's types describe its ESM build, but Node loads the CJS "main" whose
+  // default export is the parser class itself; construct it through that shape.
+  const parser = new (DxfParser as unknown as new () => { parseSync(text: string): unknown })();
   const parsed = parser.parseSync(text) as unknown as RawDxfDocument | null;
 
   if (!parsed) {

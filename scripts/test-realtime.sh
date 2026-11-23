@@ -8,7 +8,7 @@ exec node --input-type=module - <<'NODE_EOF'
 import assert from 'node:assert/strict';
 import { io } from 'socket.io-client';
 
-const API_URL = process.env.API_URL || 'http://localhost:3000/api/v1';
+const API_URL = process.env.API_URL || 'http://localhost:4000/api/v1';
 const SOCKET_URL = process.env.SOCKET_URL || new URL(API_URL).origin;
 
 async function apiJson(path, options = {}) {

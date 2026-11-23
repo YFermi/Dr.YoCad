@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import Fastify from 'fastify';
+import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
@@ -10,13 +10,16 @@ import { ZodError } from 'zod';
 import { MAX_UPLOAD_BYTES } from '@cadline/shared';
 import { prisma } from './lib/prisma.js';
 import { connectRedis, redis } from './lib/redis.js';
-import { ensureBucket } from './lib/s3.js';
+import { STANDALONE, STANDALONE_DATA_DIR } from './lib/standalone.js';
+import { seedStandaloneIfEmpty } from './lib/standaloneSeed.js';
+import { ensureBucket, storage, storageHealthCheck } from './lib/storage.js';
 import { registerSocketPlugin } from './plugins/socket.js';
 import { aiRoutes } from './routes/ai.js';
 import { annotationRoutes } from './routes/annotations.js';
 import { authRoutes } from './routes/auth.js';
 import { commentRoutes } from './routes/comments.js';
 import { fileRoutes } from './routes/files.js';
+import { localStorageRoutes } from './routes/localStorage.js';
 import { measurementRoutes } from './routes/measurements.js';
 import { projectRoutes } from './routes/projects.js';
 import { shareRoutes } from './routes/share.js';
@@ -31,7 +34,7 @@ const HOST = process.env.API_HOST ?? '0.0.0.0';
 async function buildServer() {
   const fastify = Fastify({
     logger: {
-      level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+      level: process.env.LOG_LEVEL ?? (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
     },
     bodyLimit: 60 * 1024 * 1024,
   });
@@ -41,6 +44,25 @@ async function buildServer() {
     { parseAs: 'buffer' },
     (_request, body, done) => {
       done(null, body);
+    }
+  );
+
+  // Treat an empty body sent with Content-Type: application/json as "no body"
+  // (Express/body-parser behavior) instead of 400 FST_ERR_CTP_EMPTY_JSON_BODY.
+  // Bodyless POSTs such as /files/:id/presence/ping come from generic clients
+  // that always set the header. Non-empty bodies use Fastify's default secure
+  // JSON parser (prototype-poisoning protection unchanged).
+  const defaultJsonParser = fastify.getDefaultJsonParser('error', 'error');
+  fastify.removeContentTypeParser('application/json');
+  fastify.addContentTypeParser(
+    'application/json',
+    { parseAs: 'string' },
+    (request, body, done) => {
+      if (typeof body === 'string' && body.trim() === '') {
+        done(null, undefined);
+        return;
+      }
+      defaultJsonParser(request, body as string, done);
     }
   );
 
@@ -55,7 +77,7 @@ async function buildServer() {
   });
 
   await fastify.register(rateLimit, {
-    max: 300,
+    max: Number(process.env.RATE_LIMIT_MAX ?? 300),
     timeWindow: '1 minute',
   });
 
@@ -90,7 +112,7 @@ async function buildServer() {
     routePrefix: '/docs',
   });
 
-  fastify.setErrorHandler((error, _request, reply) => {
+  fastify.setErrorHandler((error: FastifyError, _request, reply) => {
     if (error instanceof ZodError) {
       return reply.status(400).send({
         success: false,
@@ -124,15 +146,36 @@ async function buildServer() {
     });
   });
 
-  fastify.get('/health', async (_request, reply) => {
-    return reply.send({
-      success: true,
+  // Liveness + dependency readiness. `/api/v1/health` is the path the web client,
+  // scripts and CI use; `/health` is kept for existing probes. Returns 503 if the
+  // database, Redis or object storage is unreachable.
+  const healthHandler = async (_request: FastifyRequest, reply: FastifyReply) => {
+    const check = async (fn: () => Promise<unknown>) => {
+      try {
+        await fn();
+        return 'ok' as const;
+      } catch {
+        return 'down' as const;
+      }
+    };
+    const [database, redisStatus, storage] = await Promise.all([
+      check(() => prisma.$queryRaw`SELECT 1`),
+      check(() => redis.ping()),
+      check(() => storageHealthCheck()),
+    ]);
+    const checks = { database, redis: redisStatus, storage };
+    const healthy = Object.values(checks).every((v) => v === 'ok');
+    return reply.status(healthy ? 200 : 503).send({
+      success: healthy,
       data: {
-        status: 'ok',
+        status: healthy ? 'ok' : 'degraded',
         timestamp: new Date().toISOString(),
+        checks,
       },
     });
-  });
+  };
+  fastify.get('/health', healthHandler);
+  fastify.get('/api/v1/health', healthHandler);
 
   await fastify.register(authRoutes, { prefix: '/api/v1/auth' });
   await fastify.register(projectRoutes, { prefix: '/api/v1/projects' });
@@ -142,6 +185,10 @@ async function buildServer() {
   await fastify.register(commentRoutes, { prefix: '/api/v1' });
   await fastify.register(measurementRoutes, { prefix: '/api/v1' });
   await fastify.register(aiRoutes, { prefix: '/api/v1/ai' });
+  if (STANDALONE) {
+    // Stand-ins for S3 presigned URLs (local disk storage); see STANDALONE.md.
+    await fastify.register(localStorageRoutes, { prefix: '/api/v1/local-storage' });
+  }
 
   registerSocketPlugin(fastify);
 
@@ -158,8 +205,15 @@ async function start() {
   try {
     await connectRedis();
     await ensureBucket();
+    const seeded = STANDALONE ? await seedStandaloneIfEmpty(prisma, storage) : false;
     startConversionWorker();
     await fastify.listen({ port: PORT, host: HOST });
+    if (STANDALONE) {
+      console.log(
+        `[standalone] API ready on http://localhost:${PORT} (data: ${STANDALONE_DATA_DIR}` +
+          `${seeded ? ', demo data seeded' : ''})`
+      );
+    }
     fastify.log.info(`API listening on http://${HOST}:${PORT} (Swagger at /docs)`);
   } catch (err) {
     fastify.log.error(err);

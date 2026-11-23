@@ -46,7 +46,7 @@ import {
 } from '../lib/aiContext.js';
 import { checkAiRateLimit, type AiRateLimitBucket } from '../lib/aiRateLimit.js';
 import { prisma } from '../lib/prisma.js';
-import { getObjectBuffer } from '../lib/s3.js';
+import { downloadObjectBuffer } from '../lib/storage.js';
 import { authenticate, requirePermission } from '../middleware/auth.js';
 
 function sendAiNotConfigured(reply: FastifyReply) {
@@ -104,19 +104,25 @@ function handleAiError(error: unknown, reply: FastifyReply) {
 async function readJsonArtifact<T>(key: string | null | undefined): Promise<T | null> {
   if (!key) return null;
   try {
-    const buf = await getObjectBuffer(key);
+    const buf = await downloadObjectBuffer(key);
     return JSON.parse(buf.toString('utf8')) as T;
   } catch {
     return null;
   }
 }
 
-async function loadFileContextFromDb(fileId: string, requestedVersionId?: string) {
-  const file = await prisma.file.findUnique({
-    where: { id: fileId },
+async function loadFileContextFromDb(
+  fileId: string,
+  organizationId: string,
+  requestedVersionId?: string
+) {
+  // Scoped to the caller's org: AI context must never include another tenant's file.
+  const file = await prisma.file.findFirst({
+    where: { id: fileId, project: { organizationId } },
     include: {
       versions: {
         orderBy: { versionNumber: 'desc' },
+        include: { conversionJob: true },
       },
     },
   });
@@ -196,7 +202,9 @@ async function loadFileContextFromDb(fileId: string, requestedVersionId?: string
     updatedAt: m.updatedAt.toISOString(),
   }));
 
-  const storageKey = activeVersion?.storageKey ?? file.storageKey;
+  // Conversion artifacts live on the version's ConversionJob (see workers/conversionWorker.ts):
+  // partTree / layerManifest / bounds / pageManifest in the DB, the DXF scene JSON in S3 at sceneKey.
+  const job = activeVersion?.conversionJob ?? null;
   const ext = file.extension.toLowerCase();
 
   let partTree: PartNode[] | null = null;
@@ -208,18 +216,16 @@ async function loadFileContextFromDb(fileId: string, requestedVersionId?: string
   let pdf: PdfPageManifest | null = null;
 
   if (ext === 'dxf') {
-    const [scene, layers, bounds] = await Promise.all([
-      readJsonArtifact<DxfSceneGraph>(`${storageKey}.scene.json`),
-      readJsonArtifact<DxfLayerManifestItem[]>(`${storageKey}.layers.json`),
-      readJsonArtifact<DxfBounds>(`${storageKey}.bounds.json`),
-    ]);
+    const scene = await readJsonArtifact<DxfSceneGraph>(job?.sceneKey);
+    const layers = (job?.layerManifest ?? null) as unknown as DxfLayerManifestItem[] | null;
+    const bounds = (job?.bounds ?? null) as unknown as DxfBounds | null;
     if (scene && layers && bounds) {
       dxf = { scene, layers, bounds };
     }
   } else if (ext === 'pdf') {
-    pdf = await readJsonArtifact<PdfPageManifest>(`${storageKey}.pages.json`);
+    pdf = (job?.pageManifest ?? null) as unknown as PdfPageManifest | null;
   } else {
-    partTree = await readJsonArtifact<PartNode[]>(`${storageKey}.part-tree.json`);
+    partTree = Array.isArray(job?.partTree) ? (job!.partTree as unknown as PartNode[]) : null;
   }
 
   return {
@@ -294,7 +300,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
       if (!enforceRateLimit(request.authUser!.id, 'chat', reply)) return;
       if (!isAiConfigured()) return sendAiNotConfigured(reply);
 
-      const loaded = await loadFileContextFromDb(body.fileId, body.versionId);
+      const loaded = await loadFileContextFromDb(body.fileId, request.authUser!.organizationId, body.versionId);
       if (!loaded) {
         return reply.status(404).send({
           success: false,
@@ -351,7 +357,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
       if (!enforceRateLimit(request.authUser!.id, 'analysis', reply)) return;
       if (!isAiConfigured()) return sendAiNotConfigured(reply);
 
-      const loaded = await loadFileContextFromDb(body.fileId, body.versionId);
+      const loaded = await loadFileContextFromDb(body.fileId, request.authUser!.organizationId, body.versionId);
       if (!loaded) {
         return reply.status(404).send({
           success: false,
@@ -453,7 +459,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
       if (!enforceRateLimit(request.authUser!.id, 'analysis', reply)) return;
       if (!isAiConfigured()) return sendAiNotConfigured(reply);
 
-      const loaded = await loadFileContextFromDb(body.fileId, body.versionId);
+      const loaded = await loadFileContextFromDb(body.fileId, request.authUser!.organizationId, body.versionId);
       if (!loaded) {
         return reply.status(404).send({
           success: false,
@@ -526,7 +532,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
       if (!enforceRateLimit(request.authUser!.id, 'analysis', reply)) return;
       if (!isAiConfigured()) return sendAiNotConfigured(reply);
 
-      const loaded = await loadFileContextFromDb(body.fileId, body.versionId);
+      const loaded = await loadFileContextFromDb(body.fileId, request.authUser!.organizationId, body.versionId);
       if (!loaded) {
         return reply.status(404).send({
           success: false,
@@ -591,7 +597,10 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const query = aiInsightsListQuerySchema.parse(request.query);
       const rows = await prisma.aIInsight.findMany({
-        where: { fileId: query.fileId },
+        where: {
+          fileId: query.fileId,
+          file: { project: { organizationId: request.authUser!.organizationId } },
+        },
         orderBy: { createdAt: 'desc' },
         take: 50,
       });

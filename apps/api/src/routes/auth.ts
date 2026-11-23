@@ -134,6 +134,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       id: user.id,
       organizationId: user.organizationId,
       email: user.email,
+      name: user.name,
       role: user.role as UserRole,
     });
     const refresh = signRefreshToken(user.id);
@@ -212,6 +213,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       id: user.id,
       organizationId: user.organizationId,
       email: user.email,
+      name: user.name,
       role: user.role as UserRole,
     });
     const refresh = signRefreshToken(user.id);
@@ -297,6 +299,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       id: stored.user.id,
       organizationId: stored.user.organizationId,
       email: stored.user.email,
+      name: stored.user.name,
       role: stored.user.role as UserRole,
     });
 

@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import type { AuthSession, AuthTokens, Organization, User } from '@cadline/shared';
 import { apiFetch, registerAuthHandlers } from './api';
 import { clearPersistedAiChats } from '@/stores/aiStore';
+import {
+  LOCAL_ORGANIZATION,
+  LOCAL_USER,
+  STANDALONE,
+  STANDALONE_ACCESS_TOKEN,
+} from './standalone';
 
 const STORAGE_KEY = 'cadline.auth.v1';
 
@@ -59,14 +65,16 @@ interface AuthState {
   hydrate: () => Promise<void>;
 }
 
-const initialTokens = readStoredTokens();
+// STANDALONE: no stored session; the store starts signed in as the fixed
+// local user (see ./standalone.ts) and never calls the auth API.
+const initialTokens = STANDALONE ? null : readStoredTokens();
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  user: null,
-  organization: null,
-  accessToken: initialTokens?.accessToken ?? null,
+  user: STANDALONE ? LOCAL_USER : null,
+  organization: STANDALONE ? LOCAL_ORGANIZATION : null,
+  accessToken: STANDALONE ? STANDALONE_ACCESS_TOKEN : (initialTokens?.accessToken ?? null),
   refreshToken: initialTokens?.refreshToken ?? null,
-  isHydrated: false,
+  isHydrated: STANDALONE,
   isLoading: false,
 
   setTokens: (tokens) => {
@@ -117,6 +125,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    // STANDALONE has no session to end; the local user is always signed in.
+    if (STANDALONE) return;
+
     const refreshToken = get().refreshToken;
     try {
       if (refreshToken) {
@@ -142,6 +153,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   hydrate: async () => {
+    // STANDALONE: no /auth/me request. The user is the fixed local user.
+    if (STANDALONE) {
+      set({
+        user: LOCAL_USER,
+        organization: LOCAL_ORGANIZATION,
+        accessToken: STANDALONE_ACCESS_TOKEN,
+        refreshToken: null,
+        isHydrated: true,
+      });
+      return;
+    }
+
     const { accessToken, refreshToken } = get();
     if (!accessToken && !refreshToken) {
       set({ isHydrated: true });
@@ -196,6 +219,8 @@ registerAuthHandlers({
     notifyAuthChange(session.tokens.accessToken, session.user.name);
   },
   onAuthFailure: () => {
+    // STANDALONE never signs out (a 401 here means the API is not in STANDALONE).
+    if (STANDALONE) return;
     writeStoredTokens(null);
     clearPersistedAiChats();
     useAuthStore.setState({

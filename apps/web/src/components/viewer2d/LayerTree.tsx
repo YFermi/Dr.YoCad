@@ -1,4 +1,3 @@
-import * as React from 'react';
 import { Eye, EyeOff, Layers, RotateCcw } from 'lucide-react';
 import type { DxfLayerManifestItem } from '@cadline/shared';
 import { useViewer2DStore } from '@/stores/viewer2dStore';

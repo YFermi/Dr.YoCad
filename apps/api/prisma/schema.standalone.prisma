@@ -1,0 +1,352 @@
+// GENERATED from schema.prisma by apps/api/scripts/standalone/prepare.mjs.
+// Do not edit: change schema.prisma; `npm run dev:standalone` regenerates this.
+// Same models as schema.prisma, stored in SQLite for STANDALONE mode (STANDALONE.md).
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma-standalone/client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("STANDALONE_DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum SharePermission {
+  VIEW
+  COMMENT
+  MEASURE
+  EDIT
+  ADMIN
+}
+
+enum FileStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum AnnotationType {
+  PIN
+  CALLOUT
+  FREEHAND
+  CLOUD
+  ARROW
+}
+
+enum MeasurementType {
+  DISTANCE
+  ANGLE
+  RADIUS
+  DIAMETER
+  AREA
+}
+
+enum ActivityAction {
+  USER_REGISTERED
+  PROJECT_CREATED
+  PROJECT_UPDATED
+  FILE_UPLOAD_INITIATED
+  FILE_UPLOAD_COMPLETED
+  FILE_DELETED
+  SHARE_LINK_CREATED
+  COMMENT_CREATED
+  ANNOTATION_CREATED
+  MEASUREMENT_CREATED
+}
+
+enum AIInsightType {
+  SUMMARY
+  DFM_CHECK
+  BOM_EXTRACTION
+  TOLERANCE_REVIEW
+}
+
+model Organization {
+  id           String        @id @default(cuid())
+  name         String
+  slug         String        @unique
+  users        User[]
+  projects     Project[]
+  activityLogs ActivityLog[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model User {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String         @unique
+  passwordHash   String?
+  name           String
+  role           UserRole       @default(MEMBER)
+  avatarUrl      String?
+  oauthProvider  String?
+  oauthSubject   String?
+  refreshTokens  RefreshToken[]
+  projects       Project[]      @relation("ProjectCreator")
+  uploadedFiles  File[]         @relation("FileUploader")
+  fileVersions   FileVersion[]  @relation("VersionUploader")
+  shareLinks     ShareLink[]    @relation("ShareLinkCreator")
+  annotations    Annotation[]
+  comments       Comment[]
+  measurements   Measurement[]
+  activityLogs   ActivityLog[]
+  aiInsights     AIInsight[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([organizationId])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+model Project {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById    String
+  createdBy      User          @relation("ProjectCreator", fields: [createdById], references: [id])
+  name           String
+  description    String?
+  folders        Folder[]
+  files          File[]
+  shareLinks     ShareLink[]
+  activityLogs   ActivityLog[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId])
+  @@index([createdById])
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parentId  String?
+  parent    Folder?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[] @relation("FolderHierarchy")
+  name      String
+  files     File[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([parentId])
+}
+
+model File {
+  id             String        @id @default(cuid())
+  projectId      String
+  project        Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  folderId       String?
+  folder         Folder?       @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  uploadedById   String
+  uploadedBy     User          @relation("FileUploader", fields: [uploadedById], references: [id])
+  name           String
+  originalName   String
+  mimeType       String
+  extension      String
+  sizeBytes      Int           @default(0)
+  status         FileStatus    @default(UPLOADING)
+  currentVersion Int           @default(1)
+  versions       FileVersion[]
+  shareLinks     ShareLink[]
+  annotations    Annotation[]
+  comments       Comment[]
+  measurements   Measurement[]
+  activityLogs   ActivityLog[]
+  aiInsights     AIInsight[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([projectId])
+  @@index([folderId])
+  @@index([uploadedById])
+}
+
+model FileVersion {
+  id            String         @id @default(cuid())
+  fileId        String
+  file          File           @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  versionNumber Int
+  storageKey    String
+  s3UploadId    String?
+  sizeBytes     Int            @default(0)
+  checksum      String?
+  status        FileStatus     @default(UPLOADING)
+  uploadedById  String
+  uploadedBy    User           @relation("VersionUploader", fields: [uploadedById], references: [id])
+  conversionJob ConversionJob?
+  annotations   Annotation[]
+  measurements  Measurement[]
+  aiInsights    AIInsight[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([fileId, versionNumber])
+  @@index([fileId])
+  @@index([uploadedById])
+}
+
+model ConversionJob {
+  id            String      @id @default(cuid())
+  fileVersionId String      @unique
+  fileVersion   FileVersion @relation(fields: [fileVersionId], references: [id], onDelete: Cascade)
+  status        String      @default("QUEUED") // QUEUED | RUNNING | DONE | FAILED
+  mode          String      @default("3D")     // "3D" | "2D_DXF" | "2D_PDF"
+  glbStorageKey String?
+  partTree      Json?
+  sceneKey      String?                        // S3 key for the DXF scene JSON
+  layerManifest Json?                          // layer name/color list
+  bounds        Json?                          // 2D bounds for fit-to-view
+  pageManifest  Json?                          // PDF page manifest
+  featuresJson  Json?                          // cached client-extracted L2 geometric features
+  error         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([status])
+}
+
+model ShareLink {
+  id          String          @id @default(cuid())
+  token       String          @unique
+  fileId      String?
+  file        File?           @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  projectId   String?
+  project     Project?        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User            @relation("ShareLinkCreator", fields: [createdById], references: [id])
+  permission  SharePermission @default(VIEW)
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([fileId])
+  @@index([projectId])
+  @@index([createdById])
+}
+
+model Annotation {
+  id        String         @id @default(cuid())
+  fileId    String
+  file      File           @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  versionId String
+  version   FileVersion    @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      AnnotationType
+  label     String?
+  payload   Json
+  comments  Comment[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([fileId])
+  @@index([versionId])
+  @@index([userId])
+}
+
+model Comment {
+  id           String      @id @default(cuid())
+  fileId       String
+  file         File        @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  annotationId String?
+  annotation   Annotation? @relation(fields: [annotationId], references: [id], onDelete: SetNull)
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentId     String?
+  parent       Comment?    @relation("CommentThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies      Comment[]   @relation("CommentThread")
+  body         String
+  resolved     Boolean     @default(false)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([fileId])
+  @@index([userId])
+  @@index([annotationId])
+}
+
+model Measurement {
+  id        String          @id @default(cuid())
+  fileId    String
+  file      File            @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  versionId String
+  version   FileVersion     @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      MeasurementType
+  value     Float
+  unit      String          @default("mm")
+  points    Json
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([fileId])
+  @@index([versionId])
+  @@index([userId])
+}
+
+model ActivityLog {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  projectId      String?
+  project        Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  fileId         String?
+  file           File?          @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action         ActivityAction
+  metadata       Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([fileId])
+  @@index([userId])
+}
+
+model AIInsight {
+  id        String        @id @default(cuid())
+  fileId    String
+  file      File          @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  versionId String
+  version   FileVersion   @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  type      AIInsightType
+  summary   String
+  payload   Json
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([fileId])
+  @@index([versionId])
+  @@index([userId])
+}

@@ -3,6 +3,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import type { ConversionMode } from '@cadline/shared';
 import { verifyAccessToken } from '../middleware/auth.js';
 import { prisma } from '../lib/prisma.js';
+import { LOCAL_USER, STANDALONE } from '../lib/standalone.js';
 import { attachCollaborationHub } from '../lib/realtimeHub.js';
 
 declare module 'fastify' {
@@ -30,6 +31,16 @@ export function registerSocketPlugin(fastify: FastifyInstance): void {
 
   attachCollaborationHub(io, {
     verifyToken: (token) => {
+      // STANDALONE: the web client sends a placeholder token; every socket that
+      // presents one is the local user (token-less sockets stay guests).
+      if (STANDALONE) {
+        return {
+          userId: LOCAL_USER.id,
+          email: LOCAL_USER.email,
+          name: LOCAL_USER.name,
+          organizationId: LOCAL_USER.organizationId,
+        };
+      }
       try {
         const payload = verifyAccessToken(token);
         return {

@@ -6,10 +6,9 @@ set -euo pipefail
 # -> POST annotation -> POST comment -> GET comments
 #
 # Usage:
-#   API_URL=http://localhost:3000/api/v1 bash scripts/test-annotations.sh
 #   API_URL=http://localhost:4000/api/v1 bash scripts/test-annotations.sh
 
-API_URL="${API_URL:-http://localhost:3000/api/v1}"
+API_URL="${API_URL:-http://localhost:4000/api/v1}"
 PASS_COUNT=0
 FAIL_COUNT=0
 

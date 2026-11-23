@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChevronDown, LogOut, FolderKanban } from 'lucide-react';
 import { useAuthStore } from '@/lib/auth';
+import { STANDALONE } from '@/lib/standalone';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -109,11 +110,16 @@ export function AppShell({
                     <FolderKanban className="h-4 w-4 text-muted-foreground" />
                     Projects
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem destructive onSelect={handleLogout}>
-                    <LogOut className="h-4 w-4" />
-                    Sign out
-                  </DropdownMenuItem>
+                  {/* STANDALONE: single local user, nothing to sign out of. */}
+                  {!STANDALONE && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem destructive onSelect={handleLogout}>
+                        <LogOut className="h-4 w-4" />
+                        Sign out
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
