@@ -103,4 +103,11 @@ for i in "${!NAMES[@]}"; do
   fi
 done
 echo "${failed} of ${#NAMES[@]} suites failed"
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  summary=""
+  for i in "${!NAMES[@]}"; do
+    summary+="$([ "${CODES[$i]}" -eq 0 ] && echo PASS || echo FAIL) ${NAMES[$i]} (exit ${CODES[$i]})%0A"
+  done
+  echo "::notice title=test-all: ${failed} of ${#NAMES[@]} suites failed::${summary}"
+fi
 [ "${failed}" -eq 0 ]
