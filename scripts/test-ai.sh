@@ -7,7 +7,7 @@ cd "$SCRIPT_DIR"
 exec node --input-type=module - <<'NODE_EOF'
 import assert from 'node:assert/strict';
 
-const API_URL = process.env.API_URL || 'http://localhost:3000/api/v1';
+const API_URL = process.env.API_URL || 'http://localhost:4000/api/v1';
 const AI_TEST_KEY = (process.env.AI_TEST_KEY || '').trim();
 
 async function apiJson(path, options = {}) {

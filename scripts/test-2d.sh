@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_URL="${API_URL:-http://localhost:3000/api/v1}"
+API_URL="${API_URL:-http://localhost:4000/api/v1}"
 DEMO_EMAIL="${DEMO_EMAIL:-admin@demo.local}"
 DEMO_PASSWORD="${DEMO_PASSWORD:-Password123!}"
 

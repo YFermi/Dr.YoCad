@@ -9,9 +9,9 @@ set -euo pipefail
 # 5. Verifies SmartMeasurement POST/GET/PATCH/DELETE persistence round-trip
 #
 # Usage:
-#   API_URL=http://localhost:3000/api/v1 bash scripts/test-measurements.sh
+#   API_URL=http://localhost:4000/api/v1 bash scripts/test-measurements.sh
 
-API_URL="${API_URL:-http://localhost:3000/api/v1}"
+API_URL="${API_URL:-http://localhost:4000/api/v1}"
 BASE_ORIGIN="${API_URL%/api/v1}"
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -58,6 +58,7 @@ upload_and_wait_ready() {
 
   local chunk_resp etag
   chunk_resp=$(curl -sS -X PUT "${API_URL}/files/${file_id}/chunk?uploadId=${upload_id}&partNumber=1" \
+    -H "Authorization: Bearer ${token}" \
     -H "Content-Type: application/octet-stream" \
     --data-binary "@${file_path}")
   etag=$(echo "${chunk_resp}" | json_get 'data.data.etag')

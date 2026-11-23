@@ -185,7 +185,7 @@ async function main() {
     });
   }
 
-  console.log('Seed completed with MinIO sample models & queued conversion jobs:', {
+  console.log('Seed completed: sample models uploaded to S3 and conversion jobs queued:', {
     organization: org.slug,
     users: ['admin@demo.local', 'user@demo.local'],
     project: project.name,
