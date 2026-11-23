@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: typecheck, build, and test against Fastify + Postgres + Redis + S3
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      API_URL: http://localhost:4000/api/v1
+      # Everything else (DATABASE_URL, REDIS_URL, S3_*) comes from .env.example via
+      # apps/api/scripts/load-env.mjs, i.e. exactly what a fresh clone uses.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version from package.json "packageManager"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Generate per-run JWT secrets
+        run: |
+          echo "JWT_ACCESS_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "JWT_REFRESH_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+
+      - name: Start Postgres, Redis, S3 (docker compose)
+        run: docker compose up -d --wait --wait-timeout 180
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma migrate deploy
+        run: pnpm --filter api prisma migrate deploy
+
+      - name: Seed
+        run: pnpm --filter api seed
+
+      - name: Typecheck (all workspaces)
+        run: pnpm -r typecheck
+
+      - name: Build (all workspaces)
+        run: pnpm -r build
+
+      - name: Start API (compiled)
+        run: |
+          nohup pnpm --filter api start > api.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:4000/api/v1/health >/dev/null 2>&1; then
+              echo "API healthy after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "API did not become healthy"; cat api.log; exit 1
+
+      - name: Run all 7 suites
+        run: bash scripts/test-all.sh
+
+      - name: API log
+        if: always()
+        run: cat api.log || true
+
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs
+          path: api.log
+          if-no-files-found: ignore
