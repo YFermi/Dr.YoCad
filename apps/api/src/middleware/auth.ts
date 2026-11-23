@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { PERMISSION_RANK, SharePermission, UserRole } from '@cadline/shared';
 import { resolveJwtSecret } from '../lib/jwtSecrets.js';
 import { prisma } from '../lib/prisma.js';
+import { LOCAL_USER, STANDALONE } from '../lib/standalone.js';
 
 const ACCESS_SECRET = resolveJwtSecret('JWT_ACCESS_SECRET');
 const REFRESH_SECRET = resolveJwtSecret('JWT_REFRESH_SECRET');
@@ -162,10 +163,30 @@ export function roleToPermission(role: UserRole): SharePermission {
   }
 }
 
+/**
+ * STANDALONE only (STANDALONE=true, never with NODE_ENV=production): every
+ * request runs as the fixed local OWNER. See STANDALONE.md.
+ */
+function applyStandaloneUser(request: FastifyRequest): void {
+  request.authUser = {
+    id: LOCAL_USER.id,
+    organizationId: LOCAL_USER.organizationId,
+    email: LOCAL_USER.email,
+    name: LOCAL_USER.name,
+    role: UserRole.OWNER,
+  };
+  request.effectivePermission = SharePermission.ADMIN;
+}
+
 export async function authenticate(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<FastifyReply | void> {
+  if (STANDALONE) {
+    applyStandaloneUser(request);
+    return;
+  }
+
   const header = request.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
     return reply.status(401).send({
@@ -252,6 +273,11 @@ export function requirePermission(requiredLevel: SharePermission) {
     request: FastifyRequest,
     reply: FastifyReply
   ): Promise<FastifyReply | void> {
+    if (STANDALONE) {
+      applyStandaloneUser(request);
+      return;
+    }
+
     const authHeader = request.headers.authorization;
     const shareTokenHeader = request.headers['x-share-token'];
     const shareToken =
