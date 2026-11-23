@@ -13,9 +13,6 @@ build/
 .env.local
 .env.*.local
 
-# Prisma & local storage
-.tmp-uploads/
-
 # Logs & OS
 *.log
 npm-debug.log*

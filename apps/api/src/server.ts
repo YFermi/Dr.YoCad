@@ -145,8 +145,7 @@ async function buildServer() {
   });
 
   // Liveness + dependency readiness. `/api/v1/health` is the path the web client,
-  // scripts and CI use (same as the former mock server); `/health` is kept for
-  // existing probes. Returns 503 if Postgres, Redis or the S3 bucket is unreachable.
+  // scripts and CI use; `/health` is kept for existing probes. Returns 503 if Postgres, Redis or the S3 bucket is unreachable.
   const healthHandler = async (_request: FastifyRequest, reply: FastifyReply) => {
     const check = async (fn: () => Promise<unknown>) => {
       try {
