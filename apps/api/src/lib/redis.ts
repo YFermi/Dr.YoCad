@@ -1,17 +1,28 @@
 import { Redis } from 'ioredis';
+import { MemoryRedis } from './memoryRedis.js';
+import { STANDALONE } from './standalone.js';
 
-const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
+function createRedis(): Redis {
+  const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 
-export const redis = new Redis(redisUrl, {
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
-  lazyConnect: true,
-  retryStrategy: (times) => Math.min(times * 50, 2000),
-});
+  const client = new Redis(redisUrl, {
+    maxRetriesPerRequest: 3,
+    enableReadyCheck: true,
+    lazyConnect: true,
+    retryStrategy: (times) => Math.min(times * 50, 2000),
+  });
 
-redis.on('error', (err) => {
-  console.error('[redis] connection error:', err.message);
-});
+  client.on('error', (err) => {
+    console.error('[redis] connection error:', err.message);
+  });
+
+  return client;
+}
+
+// STANDALONE: in-memory stand-in, no Redis server (see lib/memoryRedis.ts).
+export const redis: Redis = STANDALONE
+  ? (new MemoryRedis() as unknown as Redis)
+  : createRedis();
 
 export async function connectRedis(): Promise<void> {
   if (redis.status === 'wait') {
