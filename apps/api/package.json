@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node --conditions=production --import ./scripts/load-env.mjs dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "postinstall": "prisma generate",
     "prisma": "node --import ./scripts/load-env.mjs node_modules/prisma/build/index.js",
     "seed": "tsx --import ./scripts/load-env.mjs prisma/seed.ts"
   },
