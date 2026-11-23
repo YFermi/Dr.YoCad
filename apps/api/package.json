@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch --import ./scripts/load-env.mjs src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "node --import ./scripts/load-env.mjs dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "prisma": "prisma",
-    "seed": "tsx prisma/seed.ts"
+    "prisma": "node --import ./scripts/load-env.mjs node_modules/prisma/build/index.js",
+    "seed": "tsx --import ./scripts/load-env.mjs prisma/seed.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.675.0",
@@ -44,5 +44,8 @@
     "prisma": "^5.22.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.3"
+  },
+  "prisma": {
+    "seed": "tsx --import ./scripts/load-env.mjs prisma/seed.ts"
   }
 }

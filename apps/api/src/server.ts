@@ -56,7 +56,7 @@ async function buildServer() {
   });
 
   await fastify.register(rateLimit, {
-    max: 300,
+    max: Number(process.env.RATE_LIMIT_MAX ?? 300),
     timeWindow: '1 minute',
   });
 
