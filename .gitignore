@@ -14,7 +14,6 @@ build/
 .env.*.local
 
 # Prisma & local storage
-apps/api/prisma/migrations/migration_lock.toml
 .tmp-uploads/
 
 # Logs & OS
