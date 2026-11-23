@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "prisma generate && tsx watch --import ./scripts/load-env.mjs src/server.ts",
+    "dev:standalone": "node scripts/standalone/dev.mjs",
     "build": "prisma generate && tsc -p tsconfig.json",
     "start": "node --conditions=production --import ./scripts/load-env.mjs dist/server.js",
     "typecheck": "prisma generate && tsc --noEmit -p tsconfig.json",

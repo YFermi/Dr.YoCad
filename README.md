@@ -2,19 +2,37 @@
 
 Design review for CAD files in the browser: 3D models (STEP/IGES/BREP via OpenCASCADE, STL, OBJ, GLB/glTF), 2D drawings (DXF, PDF), annotations, threaded comments, measurements, real-time collaboration, and an optional AI assistant.
 
-## Stack
-
-- **Monorepo**: pnpm workspaces — `apps/api`, `apps/web`, `packages/shared`, `scripts`
-- **API** (`apps/api`, port 4000): Fastify 5, Prisma 5 + PostgreSQL 16, Redis 7, Socket.IO, `occt-import-js`, `@gltf-transform/core`, optional Gemini (`@google/genai`)
-- **Web** (`apps/web`, port 5173): React 19, Vite, Tailwind CSS 4, Three.js (`@react-three/fiber`, `three-mesh-bvh`), Konva, TanStack Query, Zustand
-- **Shared** (`packages/shared`): zod 3 schemas and TypeScript types used by both apps
-- **Object storage**: any S3-compatible service. Local dev and CI use [SeaweedFS](https://github.com/seaweedfs/seaweedfs)'s S3 gateway (MinIO's community images are no longer distributed).
-
-There is one backend: `apps/api`. The web dev server proxies `/api` and `/socket.io` to it.
-
 ## Quick start
 
-Requires Node 22+, pnpm (via `corepack enable`), and Docker.
+```bash
+git clone https://github.com/YFermi/Dr.YoCad.git && cd Dr.YoCad
+npm install
+npm run dev:standalone
+open http://localhost:5173
+```
+
+## Stack
+
+- **Monorepo**: pnpm workspaces: `apps/api`, `apps/web`, `packages/shared`, `scripts`. Requires Node 20.19+ (or 22.12+). `npm install` installs the workspace with the pinned pnpm via `npx`, so no global pnpm is needed.
+- **API** (`apps/api`, port 4000): Fastify 5, Prisma 6, Socket.IO, `occt-import-js`, `@gltf-transform/core`, optional Gemini (`@google/genai`)
+- **Web** (`apps/web`, port 5173): React 19, Vite, Tailwind CSS 4, Three.js (`@react-three/fiber`, `three-mesh-bvh`), Konva, TanStack Query, Zustand
+- **Shared** (`packages/shared`): zod 3 schemas and TypeScript types used by both apps
+
+There is one backend: `apps/api`. The web dev server proxies `/api` and `/socket.io` to it. It runs in one of two modes:
+
+| | `npm run dev:standalone` | Full stack (below) |
+| :--- | :--- | :--- |
+| Database | SQLite at `./data/cadline.db` | PostgreSQL 16 |
+| Files | `./data/files/` | S3-compatible storage |
+| Presence cache | in memory | Redis 7 |
+| Auth | none: everyone is the local user "Local Dev" | JWT login |
+| For | local development and demos | anything shared or deployed |
+
+STANDALONE mode is single-user and has no security. See [STANDALONE.md](STANDALONE.md) for what it changes, how to reset its data, and how to switch back.
+
+## Full stack (advanced)
+
+**Optional.** You only need this to work on or test auth, multi-user behavior, Postgres, Redis or S3. It requires Docker and pnpm (`corepack enable`, or `npx pnpm@12.21.0` in place of `pnpm`).
 
 ```bash
 docker compose up -d                      # postgres :5432, redis :6379, S3 :9000
@@ -31,7 +49,7 @@ Open <http://localhost:5173> and sign in:
 | Admin | `admin@demo.local` | `Password123!` |
 | Member | `user@demo.local` | `Password123!` |
 
-The seed uploads `scripts/seed-models/*` (STEP cube, STL cube, DXF plate, PDF sheet) and queues their conversion. The API's conversion worker processes them once `pnpm dev` is running; they show **READY** within a few seconds.
+The seed uploads `scripts/seed-models/*` (STEP cube, STL cube, DXF plate, PDF sheet) and queues their conversion. The API's conversion worker processes them once `pnpm dev` is running; they show **READY** within a few seconds. Object storage is any S3-compatible service; docker compose and CI use [SeaweedFS](https://github.com/seaweedfs/seaweedfs)'s S3 gateway, because MinIO's community images are no longer distributed.
 
 ### Configuration
 
@@ -40,12 +58,14 @@ API scripts load configuration in this order (first wins): the real environment,
 - `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET`: if unset in development the API generates random per-process secrets (sessions reset on restart) and logs a warning. **With `NODE_ENV=production` the API refuses to start without them.** They are never taken from `.env.example`.
 - `GEMINI_API_KEY`: optional. Without it, AI endpoints return `503 AI_NOT_CONFIGURED` and everything else works.
 - `RATE_LIMIT_MAX`: global per-IP request limit per minute (default 300).
+- `LOG_LEVEL`: Fastify log level (default `debug` in development, `info` in production).
+- `STANDALONE`: leave unset for the full stack. `STANDALONE=true` is STANDALONE mode, and the API refuses to start with it when `NODE_ENV=production`.
 
 To persist sessions across restarts: `cp .env.example .env` and set real secrets.
 
-## Tests
+### Tests
 
-With the stack running (`docker compose up -d`, migrate, seed, and the API on :4000):
+With the full stack running (`docker compose up -d`, migrate, seed, and the API on :4000):
 
 ```bash
 bash scripts/test-all.sh
@@ -67,11 +87,11 @@ Each suite also runs on its own, e.g. `API_URL=http://localhost:4000/api/v1 bash
 
 ## Behavior notes
 
-- **Uploads**: `POST /files/init` returns presigned S3 part URLs. The browser PUTs chunks directly to storage (the API sets bucket CORS on startup), then calls `POST /files/:id/complete`. `PUT /files/:id/chunk` is an authenticated server-side alternative.
+- **Uploads**: `POST /files/init` returns presigned part URLs. The browser PUTs chunks directly to them (the API sets bucket CORS on startup), then calls `POST /files/:id/complete`. `PUT /files/:id/chunk` is an authenticated server-side alternative. In STANDALONE mode the part URLs are signed API routes that write to `./data/files/`.
 - **Model and page delivery**: `GET /files/:id/glb` and `GET /files/:id/2d/page/:n` return short-lived signed same-origin URLs (`/files/:id/glb-binary`, `/files/:id/2d/page-image/:n`). The API streams those from storage, so `<img>` and the glTF loader need no auth headers and no bucket CORS.
 - **Share links** grant access only to the file or project they were created for; other resources return 404. Socket rooms require org membership or a share token covering the file (`auth.shareToken` in the Socket.IO handshake).
 - **DWG** is intentionally unsupported (proprietary format). Convert to DXF with the [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter) or [LibreDWG](https://www.gnu.org/software/libredwg/) first.
 - **AI assistant** (Gemini, server-side only): chat, review summary, BOM extraction and DFM pre-check, grounded in file metadata, annotations, comments and measurements. Context is capped at 50 KB and scoped to the caller's organization; raw model bytes never leave the server. Rate limits: chat 30 / 5 min, summary/BOM/DFM 5 / 10 min per user.
-- **Realtime**: REST persists, Socket.IO broadcasts deltas to the other sockets in the file room. Cursors are limited to 20 Hz and camera/viewport sync to 15 Hz per socket; `POST /files/:id/presence/ping` is the HTTP fallback (30 s Redis TTL). Voice and video are out of scope.
+- **Realtime**: REST persists, Socket.IO broadcasts deltas to the other sockets in the file room. Cursors are limited to 20 Hz and camera/viewport sync to 15 Hz per socket; `POST /files/:id/presence/ping` is the HTTP fallback (30 s TTL). Voice and video are out of scope.
 
 API docs (Swagger UI): <http://localhost:4000/docs>

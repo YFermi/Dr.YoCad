@@ -34,7 +34,7 @@ const HOST = process.env.API_HOST ?? '0.0.0.0';
 async function buildServer() {
   const fastify = Fastify({
     logger: {
-      level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+      level: process.env.LOG_LEVEL ?? (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
     },
     bodyLimit: 60 * 1024 * 1024,
   });

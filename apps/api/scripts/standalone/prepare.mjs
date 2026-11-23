@@ -1,5 +1,7 @@
 // STANDALONE preparation (run before the API starts in STANDALONE mode):
 //
+//  0. Generates the default @prisma/client if missing or stale: route code
+//     imports its enums (FileStatus, UserRole, ...) even in STANDALONE mode.
 //  1. Derives prisma/schema.standalone.prisma from prisma/schema.prisma: the
 //     same models, with `provider = "sqlite"` and a client generated into
 //     node_modules/.prisma-standalone/client. Only the generator and datasource
@@ -13,6 +15,7 @@
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -60,8 +63,8 @@ function fail(step, result) {
   process.exit(1);
 }
 
-function prisma(args, env = {}) {
-  return spawnSync(process.execPath, [prismaCli, ...args, '--schema', standaloneSchema], {
+function prisma(args, env = {}, schemaFile = standaloneSchema) {
+  return spawnSync(process.execPath, [prismaCli, ...args, '--schema', schemaFile], {
     cwd: apiDir,
     env: { ...process.env, ...env, PRISMA_HIDE_UPDATE_MESSAGE: '1' },
     encoding: 'utf8',
@@ -71,6 +74,20 @@ function prisma(args, env = {}) {
 // SQLite URL in the same form src/lib/prisma.ts passes as datasourceUrl.
 export function sqliteUrl(file) {
   return `file:${file.replace(/\\/g, '/')}`;
+}
+
+// 0. Default client: prisma generate copies schema.prisma next to the generated
+//    client, so an identical copy means it is current.
+const clientPkgDir = path.dirname(
+  createRequire(path.join(apiDir, 'package.json')).resolve('@prisma/client/package.json')
+);
+const generatedSchema = path.join(clientPkgDir, '..', '..', '.prisma', 'client', 'schema.prisma');
+if (
+  !fs.existsSync(generatedSchema) ||
+  fs.readFileSync(generatedSchema, 'utf8') !== fs.readFileSync(sourceSchema, 'utf8')
+) {
+  const result = prisma(['generate', '--no-hints'], {}, sourceSchema);
+  if (result.status !== 0) fail('prisma generate (default client)', result);
 }
 
 const schema = deriveSchema();

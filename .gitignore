@@ -1,6 +1,8 @@
 # Dependencies
 node_modules/
 .pnpm-store/
+# `npm install` only bootstraps pnpm (scripts/npm-bootstrap.mjs); pnpm-lock.yaml is the lockfile
+package-lock.json
 
 # Build outputs
 dist/

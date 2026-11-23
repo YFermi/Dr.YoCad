@@ -5,12 +5,15 @@
   "type": "module",
   "packageManager": "pnpm@12.21.0",
   "scripts": {
+    "postinstall": "node scripts/npm-bootstrap.mjs",
+    "dev:standalone": "concurrently --kill-others-on-fail --names api,web --prefix-colors cyan,magenta \"npm --silent --prefix apps/api run dev:standalone\" \"npm --silent --prefix apps/web run dev:standalone\"",
     "dev": "pnpm -r --parallel dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "bash scripts/test-all.sh"
   },
   "devDependencies": {
+    "concurrently": "^9.2.1",
     "tsx": "^4.21.0"
   }
 }
