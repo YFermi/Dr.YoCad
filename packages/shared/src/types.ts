@@ -839,7 +839,9 @@ export interface FileStatusResponse {
 }
 
 export interface FileGlbResponse {
+  /** Same-origin signed path to GET /files/:id/glb-binary (no auth header needed). */
   url: string;
+  expiresInSeconds?: number;
 }
 
 export interface FileTreeResponse {

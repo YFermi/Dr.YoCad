@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   completeFileUploadRequestSchema,
   computeAvatarColor,
@@ -11,6 +11,7 @@ import {
   initFileUploadRequestSchema,
   saveFileFeaturesRequestSchema,
   SharePermission,
+  signedAssetQuerySchema,
   uploadChunkQuerySchema,
   type ConversionJobStatus,
   type ConversionMode,
@@ -28,13 +29,19 @@ import {
   completeMultipartUpload,
   deleteStorageObject,
   downloadObjectBuffer,
+  getObjectStream,
   getPresignedGetUrl,
   getPresignedPartUrl,
   initMultipartUpload,
   uploadMultipartChunk,
 } from '../lib/s3.js';
 import { is2DExtension } from '../lib/converter.js';
-import { authenticate, requirePermission } from '../middleware/auth.js';
+import {
+  authenticate,
+  requirePermission,
+  signAssetParams,
+  verifyAssetParams,
+} from '../middleware/auth.js';
 
 interface RawFileVersion {
   id: string;
@@ -151,6 +158,81 @@ const ERROR_RESPONSE_SCHEMA = {
     },
   },
 } as const;
+
+const ASSET_URL_TTL_SECONDS = 900;
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    /** Set by signedAssetGuard when the request carried a valid asset signature. */
+    signedAssetVersionId?: string;
+  }
+}
+
+/**
+ * preHandler for binary asset routes: a request carrying `exp` + `sig` must be a
+ * valid signed link (see signAssetParams); anything else goes through the
+ * normal JWT / share-token permission check.
+ */
+function signedAssetGuard(kind: 'glb' | 'page') {
+  const viaPermission = requirePermission(SharePermission.VIEW);
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    const query = signedAssetQuerySchema.parse(request.query ?? {});
+    if (query.sig === undefined && query.exp === undefined) {
+      return viaPermission(request, reply);
+    }
+    const params = request.params as { id: string; n?: string };
+    const extra = kind === 'page' ? String(params.n ?? '') : '';
+    if (
+      !query.sig ||
+      query.exp === undefined ||
+      !query.versionId ||
+      !verifyAssetParams(kind, params.id, query.versionId, extra, query.exp, query.sig)
+    ) {
+      return reply.status(403).send({
+        success: false,
+        error: { code: 'ASSET_LINK_INVALID', message: 'Asset link is invalid or expired' },
+      });
+    }
+    request.signedAssetVersionId = query.versionId;
+  };
+}
+
+/** Resolves the version for an asset request (signed link pins the exact version). */
+async function resolveAssetVersion(request: FastifyRequest, fileId: string) {
+  if (request.signedAssetVersionId) {
+    const version = await prisma.fileVersion.findFirst({
+      where: { id: request.signedAssetVersionId, fileId },
+      include: { conversionJob: true },
+    });
+    return version ? { fileId, version } : null;
+  }
+  const query = signedAssetQuerySchema.parse(request.query ?? {});
+  const resolved = await resolveFileVersionWithJob(fileId, request.authUser?.organizationId, {
+    v: query.v,
+    versionId: query.versionId,
+  });
+  return resolved?.version ? { fileId, version: resolved.version } : null;
+}
+
+function signedAssetPath(
+  kind: 'glb' | 'page',
+  fileId: string,
+  versionId: string,
+  page?: number
+): string {
+  const { exp, sig } = signAssetParams(
+    kind,
+    fileId,
+    versionId,
+    kind === 'page' ? String(page) : '',
+    ASSET_URL_TTL_SECONDS
+  );
+  const base =
+    kind === 'glb'
+      ? `/api/v1/files/${fileId}/glb-binary`
+      : `/api/v1/files/${fileId}/2d/page-image/${page}`;
+  return `${base}?versionId=${encodeURIComponent(versionId)}&exp=${exp}&sig=${sig}`;
+}
 
 export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post(
@@ -529,11 +611,40 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      const url = await getPresignedGetUrl(job.glbStorageKey, 900);
+      // Same-origin signed path instead of a presigned S3 URL: works for clients that
+      // also send Authorization (S3 rejects double auth), needs no bucket CORS, and
+      // lets GLTFLoader fetch without headers.
       return reply.send({
         success: true,
-        data: { url },
+        data: {
+          url: signedAssetPath('glb', resolved.file.id, version.id),
+          expiresInSeconds: ASSET_URL_TTL_SECONDS,
+        },
       });
+    }
+  );
+
+  fastify.get(
+    '/:id/glb-binary',
+    { preHandler: [signedAssetGuard('glb')] },
+    async (request, reply) => {
+      const params = fileParamsSchema.parse(request.params);
+      const resolved = await resolveAssetVersion(request, params.id);
+      const glbKey = resolved?.version.conversionJob?.glbStorageKey;
+      if (!resolved || resolved.version.status !== 'READY' || !glbKey) {
+        return reply.status(404).send({
+          success: false,
+          error: { code: 'GLB_NOT_READY', message: 'Converted GLB asset not found' },
+        });
+      }
+
+      const object = await getObjectStream(glbKey);
+      reply.header('Content-Type', 'model/gltf-binary');
+      reply.header('Cache-Control', 'private, max-age=300');
+      if (object.contentLength !== undefined) {
+        reply.header('Content-Length', String(object.contentLength));
+      }
+      return reply.send(object.body);
     }
   );
 

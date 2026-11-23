@@ -94,6 +94,23 @@ export async function downloadObjectBuffer(storageKey: string): Promise<Buffer> 
   return Buffer.from(bytes);
 }
 
+/** Streams an object from storage (used by the binary asset proxy routes). */
+export async function getObjectStream(storageKey: string): Promise<{
+  body: NodeJS.ReadableStream;
+  contentLength?: number;
+}> {
+  const response = await s3Client.send(
+    new GetObjectCommand({ Bucket: S3_BUCKET, Key: storageKey })
+  );
+  if (!response.Body) {
+    throw new Error(`Empty response body for S3 key: ${storageKey}`);
+  }
+  return {
+    body: response.Body as NodeJS.ReadableStream,
+    contentLength: response.ContentLength,
+  };
+}
+
 export async function uploadObjectBuffer(
   storageKey: string,
   body: Buffer | Uint8Array,

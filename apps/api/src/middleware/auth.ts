@@ -101,6 +101,50 @@ export function verifyRefreshToken(token: string): RefreshTokenPayload {
   return decoded;
 }
 
+/**
+ * Short-lived signed URLs for binary assets (converted GLB, PDF page PNGs).
+ * Browsers load these through <img src> / GLTFLoader, which cannot attach an
+ * Authorization header, so the URL itself carries an HMAC over
+ * (kind, fileId, versionId, extra, exp). Domain-separated from JWT signing.
+ */
+export function signAssetParams(
+  kind: 'glb' | 'page',
+  fileId: string,
+  versionId: string,
+  extra: string,
+  ttlSeconds: number
+): { exp: number; sig: string } {
+  const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  return { exp, sig: assetSignature(kind, fileId, versionId, extra, exp) };
+}
+
+export function verifyAssetParams(
+  kind: 'glb' | 'page',
+  fileId: string,
+  versionId: string,
+  extra: string,
+  exp: number,
+  sig: string
+): boolean {
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false;
+  const expected = Buffer.from(assetSignature(kind, fileId, versionId, extra, exp));
+  const given = Buffer.from(sig);
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given);
+}
+
+function assetSignature(
+  kind: string,
+  fileId: string,
+  versionId: string,
+  extra: string,
+  exp: number
+): string {
+  return crypto
+    .createHmac('sha256', ACCESS_SECRET)
+    .update(`cadline-asset-v1|${kind}|${fileId}|${versionId}|${extra}|${exp}`)
+    .digest('base64url');
+}
+
 export function hashToken(raw: string): string {
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
