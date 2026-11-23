@@ -12,6 +12,7 @@ export const REALTIME_PROTOCOL_VERSION = 1 as const;
 
 export const REALTIME_EVENTS = {
   FILE_JOIN: 'file:join',
+  FILE_JOIN_ERROR: 'file:join:error',
   FILE_LEAVE: 'file:leave',
   ROOM_STATE: 'room:state',
   PRESENCE_JOIN: 'presence:join',

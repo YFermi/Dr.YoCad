@@ -30,8 +30,25 @@ export interface SocketAuthUser {
   avatarColor: string;
 }
 
+/** Credentials a socket presented at handshake, used to authorize room joins. */
+export interface SocketJoinAuth {
+  /** Set only for sockets with a verified access token. */
+  userId: string | null;
+  organizationId: string | null;
+  /** Share token from `handshake.auth.shareToken`, if any. */
+  shareToken: string | null;
+}
+
 export interface CollaborationHubOptions {
-  verifyToken: (token: string) => { userId: string; email: string; name?: string } | null;
+  verifyToken: (
+    token: string
+  ) => { userId: string; email: string; name?: string; organizationId: string } | null;
+  /**
+   * Decides whether a socket may join `file:<fileId>`. Authenticated sockets
+   * must belong to the org owning the file's project; unauthenticated sockets
+   * need a valid share token covering the file. Called before every join.
+   */
+  authorizeJoin: (auth: SocketJoinAuth, fileId: string) => Promise<boolean> | boolean;
   resolveFileMode: (fileId: string) => Promise<ConversionMode> | ConversionMode;
   onLog?: (message: string, meta?: Record<string, unknown>) => void;
 }
@@ -354,8 +371,17 @@ export function attachCollaborationHub(
       typeof authObj?.name === 'string' && authObj.name.trim().length > 0
         ? authObj.name.trim()
         : undefined;
+    const shareToken =
+      typeof authObj?.shareToken === 'string' && authObj.shareToken.trim().length > 0
+        ? authObj.shareToken.trim()
+        : null;
 
     if (!token) {
+      (socket.data as Record<string, unknown>).joinAuth = {
+        userId: null,
+        organizationId: null,
+        shareToken,
+      } satisfies SocketJoinAuth;
       const guestId = `guest_${socket.id.slice(0, 6)}`;
       (socket.data as Record<string, unknown>).user = {
         userId: guestId,
@@ -373,6 +399,11 @@ export function attachCollaborationHub(
       return;
     }
 
+    (socket.data as Record<string, unknown>).joinAuth = {
+      userId: verified.userId,
+      organizationId: verified.organizationId,
+      shareToken,
+    } satisfies SocketJoinAuth;
     (socket.data as Record<string, unknown>).user = {
       userId: verified.userId,
       email: verified.email,
@@ -394,6 +425,25 @@ export function attachCollaborationHub(
     socket.on(REALTIME_EVENTS.FILE_JOIN, async (raw: FileJoinPayload | ClientEvent<FileJoinPayload>) => {
       const fileId = unwrapFileId(raw);
       if (!fileId) return;
+
+      const joinAuth = (socket.data as Record<string, unknown>).joinAuth as
+        | SocketJoinAuth
+        | undefined;
+      let allowed = false;
+      try {
+        allowed = Boolean(joinAuth) && (await options.authorizeJoin(joinAuth!, fileId));
+      } catch {
+        allowed = false;
+      }
+      if (!allowed) {
+        // Same response whether the file is missing or forbidden (no existence leak).
+        socket.emit(REALTIME_EVENTS.FILE_JOIN_ERROR, {
+          fileId,
+          code: 'NOT_FOUND',
+          message: 'File not found',
+        });
+        return;
+      }
 
       const room = fileRoomName(fileId);
       await socket.join(room);

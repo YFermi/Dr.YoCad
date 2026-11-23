@@ -1057,10 +1057,24 @@ async function startServer() {
           userId: payload.sub,
           email: payload.email,
           name: user?.name,
+          organizationId: payload.orgId,
         };
       } catch {
         return null;
       }
+    },
+    authorizeJoin: (auth, fileId) => {
+      const file = files.get(fileId);
+      if (!file) return false;
+      const project = projects.get(file.projectId);
+      if (auth.organizationId && project?.organizationId === auth.organizationId) {
+        return true;
+      }
+      if (!auth.shareToken) return false;
+      const link = shareLinks.get(auth.shareToken);
+      if (!link || link.revokedAt) return false;
+      if (link.expiresAt && new Date(link.expiresAt).getTime() < Date.now()) return false;
+      return link.fileId === fileId || (!!link.projectId && link.projectId === file.projectId);
     },
     resolveFileMode: (fileId): ConversionMode => {
       const file = files.get(fileId);

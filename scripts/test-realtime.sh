@@ -146,6 +146,7 @@ async function main() {
   const room = `file:${file.id}`;
   let socketA = null;
   let socketB = null;
+  let socketGuest = null;
   let createdAnnotationId = null;
 
   try {
@@ -178,7 +179,16 @@ async function main() {
     );
     console.log('[test-realtime] PASS 1: file:join -> presence:join & room:state');
 
+    // 1b. Unauthenticated socket (no JWT, no share token) cannot join the room
+    socketGuest = await connectSocket(undefined, 'Anonymous Probe');
+    const guestDenied = waitForEvent(socketGuest, 'file:join:error', (e) => e.fileId === file.id);
+    const guestNoRoomState = assertNoEvent(socketGuest, 'room:state', 600);
+    emitEnvelope(socketGuest, 'file:join', room, { fileId: file.id });
+    await Promise.all([guestDenied, guestNoRoomState]);
+    console.log('[test-realtime] PASS 1b: unauthenticated socket file:join rejected (no room:state)');
+
     // 2. REST create annotation by A (with x-socket-id) -> B receives annotation:create, A gets NO echo
+    const guestNoDelta = assertNoEvent(socketGuest, 'annotation:create', 600);
     const annCreateBPromise = waitForEvent(
       socketB,
       'annotation:create',
@@ -212,7 +222,7 @@ async function main() {
     assert.equal(createAnnRes.status, 201, `Create annotation failed: ${JSON.stringify(createAnnRes.body)}`);
     createdAnnotationId = createAnnRes.body.data.id;
 
-    const [annEventB] = await Promise.all([annCreateBPromise, noEchoAPromise]);
+    const [annEventB] = await Promise.all([annCreateBPromise, noEchoAPromise, guestNoDelta]);
     assert.equal(annEventB.payload.id, createdAnnotationId);
     assert.equal(annEventB.payload.label, 'Realtime smoke pin');
     console.log('[test-realtime] PASS 2: REST annotation -> socket broadcast to B (no echo to A)');
@@ -322,6 +332,7 @@ async function main() {
     }
     socketA?.disconnect();
     socketB?.disconnect();
+    socketGuest?.disconnect();
   }
 }
 

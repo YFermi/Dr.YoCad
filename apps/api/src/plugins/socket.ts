@@ -35,10 +35,30 @@ export function registerSocketPlugin(fastify: FastifyInstance): void {
         return {
           userId: payload.sub,
           email: payload.email,
+          organizationId: payload.orgId,
         };
       } catch {
         return null;
       }
+    },
+    authorizeJoin: async (auth, fileId) => {
+      const file = await prisma.file.findUnique({
+        where: { id: fileId },
+        select: { projectId: true, project: { select: { organizationId: true } } },
+      });
+      if (!file) return false;
+
+      // Authenticated member of the org that owns the file's project
+      if (auth.organizationId && file.project.organizationId === auth.organizationId) {
+        return true;
+      }
+
+      // Otherwise a live share link scoped to this file or its project
+      if (!auth.shareToken) return false;
+      const link = await prisma.shareLink.findUnique({ where: { token: auth.shareToken } });
+      if (!link || link.revokedAt) return false;
+      if (link.expiresAt && link.expiresAt.getTime() < Date.now()) return false;
+      return link.fileId === fileId || (!!link.projectId && link.projectId === file.projectId);
     },
     resolveFileMode: async (fileId): Promise<ConversionMode> => {
       const file = await prisma.file.findUnique({
