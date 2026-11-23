@@ -8,6 +8,7 @@ import {
 } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from '@/lib/auth';
+import { STANDALONE } from '@/lib/standalone';
 import { AppShell } from '@/components/layout/AppShell';
 import { Toaster } from '@/components/ui/toast';
 import { LoginPage } from '@/pages/Login';
@@ -38,7 +39,8 @@ function ProtectedRoute({
   const location = useLocation();
   const { user, isHydrated } = useAuthStore();
 
-  if (!isHydrated) {
+  // STANDALONE: always signed in as the local user; no hydration wait, no redirect.
+  if (!STANDALONE && !isHydrated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
         Loading workspace...
@@ -46,7 +48,7 @@ function ProtectedRoute({
     );
   }
 
-  if (!user) {
+  if (!STANDALONE && !user) {
     return (
       <Navigate
         to="/login"
@@ -65,6 +67,8 @@ function ProtectedRoute({
 
 function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   const { user, isHydrated } = useAuthStore();
+  // STANDALONE: /login and /register still exist but go straight to the app.
+  if (STANDALONE) return <Navigate to="/projects" replace />;
   if (!isHydrated) return null;
   if (user) return <Navigate to="/projects" replace />;
   return <>{children}</>;
