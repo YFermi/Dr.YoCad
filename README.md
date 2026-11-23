@@ -30,6 +30,8 @@ There is one backend: `apps/api`. The web dev server proxies `/api` and `/socket
 
 STANDALONE mode is single-user and has no security. See [STANDALONE.md](STANDALONE.md) for what it changes, how to reset its data, and how to switch back.
 
+Smoke test, no services needed: `bash scripts/test-standalone.sh`. It starts `npm run dev:standalone` (or reuses one already on :4000), creates annotations and uploads an STL without any auth header, and checks that the converted GLB lands in `./data/files/`.
+
 ## Full stack (advanced)
 
 **Optional.** You only need this to work on or test auth, multi-user behavior, Postgres, Redis or S3. It requires Docker and pnpm (`corepack enable`, or `npx pnpm@12.21.0` in place of `pnpm`).
