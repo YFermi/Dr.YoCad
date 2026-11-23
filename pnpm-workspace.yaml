@@ -13,3 +13,10 @@ allowBuilds:
   prisma: true
   protobufjs: true
 
+# tsx and concurrently are dependencies of the `scripts` package, hoisted to the
+# root node_modules (and .bin) for the root scripts and test suites. The root
+# package.json declares no dependencies, so `npm install` has nothing to
+# install or crash on and hands off to pnpm (scripts/npm-bootstrap.mjs).
+publicHoistPattern:
+  - tsx
+  - concurrently
