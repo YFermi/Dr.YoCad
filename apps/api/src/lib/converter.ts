@@ -5,7 +5,7 @@ import type {
   PartNode,
   PdfPageManifest,
 } from '@cadline/shared';
-import { downloadObjectBuffer, uploadObjectBuffer } from './s3.js';
+import { downloadObjectBuffer, uploadObjectBuffer } from './storage.js';
 import {
   DWG_UNSUPPORTED_REASON,
   is2DExtension,

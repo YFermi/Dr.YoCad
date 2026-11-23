@@ -46,7 +46,7 @@ import {
 } from '../lib/aiContext.js';
 import { checkAiRateLimit, type AiRateLimitBucket } from '../lib/aiRateLimit.js';
 import { prisma } from '../lib/prisma.js';
-import { downloadObjectBuffer } from '../lib/s3.js';
+import { downloadObjectBuffer } from '../lib/storage.js';
 import { authenticate, requirePermission } from '../middleware/auth.js';
 
 function sendAiNotConfigured(reply: FastifyReply) {

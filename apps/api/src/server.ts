@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from 'fastify';
-import { HeadBucketCommand } from '@aws-sdk/client-s3';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
@@ -11,13 +10,16 @@ import { ZodError } from 'zod';
 import { MAX_UPLOAD_BYTES } from '@cadline/shared';
 import { prisma } from './lib/prisma.js';
 import { connectRedis, redis } from './lib/redis.js';
-import { ensureBucket, s3Client, S3_BUCKET } from './lib/s3.js';
+import { STANDALONE, STANDALONE_DATA_DIR } from './lib/standalone.js';
+import { seedStandaloneIfEmpty } from './lib/standaloneSeed.js';
+import { ensureBucket, storage, storageHealthCheck } from './lib/storage.js';
 import { registerSocketPlugin } from './plugins/socket.js';
 import { aiRoutes } from './routes/ai.js';
 import { annotationRoutes } from './routes/annotations.js';
 import { authRoutes } from './routes/auth.js';
 import { commentRoutes } from './routes/comments.js';
 import { fileRoutes } from './routes/files.js';
+import { localStorageRoutes } from './routes/localStorage.js';
 import { measurementRoutes } from './routes/measurements.js';
 import { projectRoutes } from './routes/projects.js';
 import { shareRoutes } from './routes/share.js';
@@ -145,7 +147,8 @@ async function buildServer() {
   });
 
   // Liveness + dependency readiness. `/api/v1/health` is the path the web client,
-  // scripts and CI use; `/health` is kept for existing probes. Returns 503 if Postgres, Redis or the S3 bucket is unreachable.
+  // scripts and CI use; `/health` is kept for existing probes. Returns 503 if the
+  // database, Redis or object storage is unreachable.
   const healthHandler = async (_request: FastifyRequest, reply: FastifyReply) => {
     const check = async (fn: () => Promise<unknown>) => {
       try {
@@ -158,7 +161,7 @@ async function buildServer() {
     const [database, redisStatus, storage] = await Promise.all([
       check(() => prisma.$queryRaw`SELECT 1`),
       check(() => redis.ping()),
-      check(() => s3Client.send(new HeadBucketCommand({ Bucket: S3_BUCKET }))),
+      check(() => storageHealthCheck()),
     ]);
     const checks = { database, redis: redisStatus, storage };
     const healthy = Object.values(checks).every((v) => v === 'ok');
@@ -182,6 +185,10 @@ async function buildServer() {
   await fastify.register(commentRoutes, { prefix: '/api/v1' });
   await fastify.register(measurementRoutes, { prefix: '/api/v1' });
   await fastify.register(aiRoutes, { prefix: '/api/v1/ai' });
+  if (STANDALONE) {
+    // Stand-ins for S3 presigned URLs (local disk storage); see STANDALONE.md.
+    await fastify.register(localStorageRoutes, { prefix: '/api/v1/local-storage' });
+  }
 
   registerSocketPlugin(fastify);
 
@@ -198,8 +205,15 @@ async function start() {
   try {
     await connectRedis();
     await ensureBucket();
+    const seeded = STANDALONE ? await seedStandaloneIfEmpty(prisma, storage) : false;
     startConversionWorker();
     await fastify.listen({ port: PORT, host: HOST });
+    if (STANDALONE) {
+      console.log(
+        `[standalone] API ready on http://localhost:${PORT} (data: ${STANDALONE_DATA_DIR}` +
+          `${seeded ? ', demo data seeded' : ''})`
+      );
+    }
     fastify.log.info(`API listening on http://${HOST}:${PORT} (Swagger at /docs)`);
   } catch (err) {
     fastify.log.error(err);

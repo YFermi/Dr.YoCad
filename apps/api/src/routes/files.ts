@@ -33,7 +33,7 @@ import {
   getPresignedPartUrl,
   initMultipartUpload,
   uploadMultipartChunk,
-} from '../lib/s3.js';
+} from '../lib/storage.js';
 import { is2DExtension } from '../lib/converter.js';
 import {
   authenticate,
