@@ -43,23 +43,51 @@ const anchorPayloadJsonSchema = {
   required: ['anchor'],
   additionalProperties: true,
   properties: {
+    // 3D pin anchors and 2D markup anchors (DXF/PDF). Mirrors the zod
+    // annotationAnchorSchema in @cadline/shared, which the handler still applies;
+    // this route schema previously accepted 3D only, rejecting every 2D markup.
     anchor: {
-      type: 'object',
-      required: ['position', 'cameraPose'],
-      properties: {
-        position: vec3JsonSchema,
-        normal: vec3JsonSchema,
-        partId: { type: 'string' },
-        cameraPose: {
+      anyOf: [
+        {
           type: 'object',
-          required: ['position', 'target', 'zoom'],
+          required: ['position', 'cameraPose'],
           properties: {
+            kind: { type: 'string', enum: ['3d'] },
             position: vec3JsonSchema,
-            target: vec3JsonSchema,
-            zoom: { type: 'number' },
+            normal: vec3JsonSchema,
+            partId: { type: 'string' },
+            cameraPose: {
+              type: 'object',
+              required: ['position', 'target', 'zoom'],
+              properties: {
+                position: vec3JsonSchema,
+                target: vec3JsonSchema,
+                zoom: { type: 'number' },
+              },
+            },
           },
         },
-      },
+        {
+          type: 'object',
+          required: ['kind', 'sheet', 'x', 'y', 'view'],
+          properties: {
+            kind: { type: 'string', enum: ['2d'] },
+            sheet: { type: 'string', enum: ['dxf', 'pdf'] },
+            page: { type: 'integer', minimum: 1 },
+            x: { type: 'number' },
+            y: { type: 'number' },
+            view: {
+              type: 'object',
+              required: ['scale', 'offsetX', 'offsetY'],
+              properties: {
+                scale: { type: 'number' },
+                offsetX: { type: 'number' },
+                offsetY: { type: 'number' },
+              },
+            },
+          },
+        },
+      ],
     },
   },
 } as const;
