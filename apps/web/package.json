@@ -9,7 +9,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --port 5173",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test:geometry": "tsx --test src/lib/geometry/*.test.ts"
+    "test:geometry": "tsx --test src/lib/geometry/*.test.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@cadline/shared": "workspace:*",
@@ -32,6 +33,7 @@
     "zustand": "^5.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@tailwindcss/vite": "^4.3.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

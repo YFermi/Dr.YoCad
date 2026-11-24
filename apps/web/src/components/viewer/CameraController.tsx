@@ -1,12 +1,14 @@
 import * as React from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, TrackballControls } from 'three-stdlib';
+import { OrbitControls } from 'three-stdlib';
 import type { PartNode } from '@cadline/shared';
 import { useViewerStore, type CameraPreset } from '@/stores/viewerStore';
 import { usePresenceStore } from '@/stores/presenceStore';
 import { useCursorStore } from '@/stores/cursorStore';
 import { emitRealtimeCameraSync } from '@/hooks/useRealtimeSync';
+import { FreeOrbitControls } from './FreeOrbitControls';
+import { publishViewerCamera } from './viewerCameraBridge';
 
 export interface ModelBounds {
   box: THREE.Box3;
@@ -22,7 +24,7 @@ export interface CameraControllerProps {
   modelRootRef: React.RefObject<THREE.Object3D | null>;
 }
 
-type ActiveControls = TrackballControls | OrbitControls;
+type ActiveControls = FreeOrbitControls | OrbitControls;
 
 interface CameraAnimation {
   startPos: THREE.Vector3;
@@ -39,7 +41,6 @@ interface CameraAnimation {
 
 const PRESET_ANIMATION_MS = 400;
 const ROLL_ANIMATION_MS = 240;
-const OUTER_ROLL_RING_RATIO = 0.78;
 
 // Reusable scratch vectors (zero per-frame allocations)
 const _tmpDir = new THREE.Vector3();
@@ -47,6 +48,7 @@ const _tmpUp = new THREE.Vector3();
 const _tmpRight = new THREE.Vector3();
 const _tmpEye = new THREE.Vector3();
 const _tmpQuat = new THREE.Quaternion();
+const _tmpQuat2 = new THREE.Quaternion();
 const _tmpRaycaster = new THREE.Raycaster();
 const _tmpNdc = new THREE.Vector2();
 const _tmpPlane = new THREE.Plane();
@@ -58,18 +60,33 @@ const _tmpCorner = new THREE.Vector3();
 const _tmpFollowPos = new THREE.Vector3();
 const _tmpFollowTarget = new THREE.Vector3();
 
-function isTrackballControls(controls: ActiveControls): controls is TrackballControls {
-  return 'dynamicDampingFactor' in controls;
+function isFreeControls(controls: ActiveControls | null): controls is FreeOrbitControls {
+  return controls instanceof FreeOrbitControls;
 }
 
-function flushControlsInertia(controls: ActiveControls | null): void {
-  if (!controls) return;
-  if (isTrackballControls(controls)) {
-    const prevStatic = controls.staticMoving;
-    controls.staticMoving = true;
-    controls.update();
-    controls.staticMoving = prevStatic;
+/** Moves the free-orbit pivot (no-op for the turntable fallback, which orbits its target). */
+function resetPivot(controls: ActiveControls | null, point: THREE.Vector3): void {
+  if (isFreeControls(controls)) controls.resetPivot(point);
+}
+
+function isObjectVisible(object: THREE.Object3D): boolean {
+  let cursor: THREE.Object3D | null = object;
+  while (cursor) {
+    if (!cursor.visible) return false;
+    cursor = cursor.parent;
   }
+  return true;
+}
+
+/** True when the section plane (material or renderer clipping) hides `point`. */
+function isClippedAway(
+  point: THREE.Vector3,
+  material: THREE.Material | THREE.Material[],
+  globalPlanes: THREE.Plane[]
+): boolean {
+  const materials = Array.isArray(material) ? material : [material];
+  const planes = [...globalPlanes, ...materials.flatMap((m) => m.clippingPlanes ?? [])];
+  return planes.some((plane) => plane.distanceToPoint(point) < 0);
 }
 
 function getPresetOrientation(preset: CameraPreset): {
@@ -243,6 +260,7 @@ export function CameraController({
   const { camera, gl, size, set } = useThree();
   const cameraControlMode = useViewerStore((s) => s.cameraControlMode);
   const cameraCommand = useViewerStore((s) => s.cameraCommand);
+  const cameraViewCommand = useViewerStore((s) => s.cameraViewCommand);
   const cameraPoseCommand = useViewerStore((s) => s.cameraPoseCommand);
   const cameraRollCommand = useViewerStore((s) => s.cameraRollCommand);
   const normalToSelectionCommand = useViewerStore((s) => s.normalToSelectionCommand);
@@ -270,7 +288,6 @@ export function CameraController({
       endZoom: number,
       durationMs = PRESET_ANIMATION_MS
     ) => {
-      flushControlsInertia(controlsRef.current);
       const currentTarget = controlsRef.current
         ? controlsRef.current.target.clone()
         : targetRef.current.clone();
@@ -296,7 +313,7 @@ export function CameraController({
     [camera]
   );
 
-  // Instantiate TrackballControls (default SOLIDWORKS free-tumble) or OrbitControls (fallback)
+  // Instantiate the free CAD camera (default) or OrbitControls (turntable fallback)
   React.useEffect(() => {
     const domElement = gl.domElement;
     const prevTarget = controlsRef.current
@@ -306,31 +323,34 @@ export function CameraController({
     let controls: ActiveControls;
 
     if (cameraControlMode === 'trackball') {
-      const tb = new TrackballControls(camera, domElement);
-      tb.staticMoving = false;
-      tb.dynamicDampingFactor = 0.15;
-      tb.rotateSpeed = 2.6;
-      tb.zoomSpeed = 1.1;
-      tb.panSpeed = 0.85;
-      tb.noRotate = false;
-      tb.noZoom = false;
-      tb.noPan = false;
-      // Wheel zoom-to-cursor is handled via capture-phase raycast below;
-      // keep TrackballControls.cursorZoom false so right-drag dolly stays centered on target
-      tb.cursorZoom = false;
-      // Disable A/S/D modal keys so typing in comments/chat never hijacks controls
-      tb.keys = ['', '', ''];
-      // In three-stdlib TrackballControls:
-      // case mouseButtons.LEFT -> ROTATE, case mouseButtons.MIDDLE -> ZOOM (dolly), case mouseButtons.RIGHT -> PAN
-      tb.mouseButtons = {
-        LEFT: THREE.MOUSE.LEFT,
-        MIDDLE: THREE.MOUSE.RIGHT, // Right-drag = smooth dolly (P2)
-        RIGHT: THREE.MOUSE.MIDDLE, // Middle-drag = screen-plane pan (P0)
+      const free = new FreeOrbitControls(
+        camera as THREE.PerspectiveCamera | THREE.OrthographicCamera,
+        domElement
+      );
+      // First visible, un-sectioned model surface under the cursor.
+      const pickSurface = (clientX: number, clientY: number): THREE.Vector3 | null => {
+        const root = modelRootRef.current;
+        const rect = domElement.getBoundingClientRect();
+        if (!root || rect.width <= 0 || rect.height <= 0) return null;
+        _tmpNdc.set(
+          ((clientX - rect.left) / rect.width) * 2 - 1,
+          -((clientY - rect.top) / rect.height) * 2 + 1
+        );
+        _tmpRaycaster.setFromCamera(_tmpNdc, camera);
+        for (const hit of _tmpRaycaster.intersectObject(root, true)) {
+          const obj = hit.object;
+          if (!(obj instanceof THREE.Mesh) || !isObjectVisible(obj)) continue;
+          if (isClippedAway(hit.point, obj.material, gl.clippingPlanes)) continue;
+          return hit.point.clone();
+        }
+        return null;
       };
-      tb.target.copy(prevTarget);
-      tb.enabled = !isFollowingRef.current;
-      tb.handleResize();
-      controls = tb;
+      free.pickPivot = pickSurface;
+      free.pickZoomAnchor = pickSurface;
+      free.target.copy(prevTarget);
+      free.pivot.copy(boundsRef.current?.center ?? prevTarget);
+      free.enabled = !isFollowingRef.current;
+      controls = free;
     } else {
       // Turntable fallback mode — restore world-Y upright vector
       camera.up.set(0, 1, 0);
@@ -360,21 +380,8 @@ export function CameraController({
     // Expose controller to R3F state (used by AnnotationCreateTool and GizmoHelper)
     set({ controls: controls as unknown as THREE.EventDispatcher });
 
-    const handleResize = () => {
-      if (isTrackballControls(controls)) {
-        controls.handleResize();
-      }
-    };
-
-    const resizeObserver =
-      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(handleResize) : null;
-    resizeObserver?.observe(domElement);
-    window.addEventListener('resize', handleResize);
-
     return () => {
       controls.removeEventListener('start', onStart);
-      window.removeEventListener('resize', handleResize);
-      resizeObserver?.disconnect();
       targetRef.current.copy(controls.target);
       controls.dispose();
       if (controlsRef.current === controls) {
@@ -382,7 +389,7 @@ export function CameraController({
       }
       set({ controls: null });
     };
-  }, [camera, gl, cameraControlMode, set]);
+  }, [camera, gl, cameraControlMode, set, modelRootRef]);
 
   // Keep enabled flag synchronized with follow mode
   React.useEffect(() => {
@@ -390,12 +397,11 @@ export function CameraController({
       controlsRef.current.enabled = !isFollowing;
       if (isFollowing) {
         animRef.current = null;
-        flushControlsInertia(controlsRef.current);
       }
     }
   }, [isFollowing]);
 
-  // Keep TrackballControls / OrbitControls distance bounds proportional to model scale
+  // Keep free-camera / OrbitControls distance bounds proportional to model scale
   React.useEffect(() => {
     const controls = controlsRef.current;
     if (!controls || !bounds) return;
@@ -403,66 +409,43 @@ export function CameraController({
     controls.maxDistance = Math.max(bounds.radius * 40, 2000);
   }, [bounds, cameraControlMode]);
 
-  // Custom SOLIDWORKS pointer & wheel enhancements (capture phase on canvas):
-  // - Wheel: true raycast zoom-to-cursor (+ Ctrl+wheel 10% fine zoom)
-  // - Shift + Left drag: screen-plane pan respecting current rolled camera-up
-  // - Outer-ring Left drag (trackball mode): direct screen-Z roll around view axis
+  // Turntable fallback only (OrbitControls): wheel zoom-to-cursor and Shift+Left
+  // screen-plane pan, as before. The free camera handles both itself
+  // (FreeOrbitControls), including roll, so this effect is skipped there.
   React.useEffect(() => {
+    if (cameraControlMode !== 'orbit') return;
     const domElement = gl.domElement;
 
-    let activeCustomDrag: 'none' | 'shift-pan' | 'screen-roll' = 'none';
+    let shiftPanActive = false;
     let lastClientX = 0;
     let lastClientY = 0;
-    let lastRollAngle = 0;
-
-    const getMinMaxDistance = (): { minDist: number; maxDist: number } => {
-      const b = boundsRef.current;
-      return {
-        minDist: b ? Math.max(b.radius * 0.02, 0.2) : 0.2,
-        maxDist: b ? Math.max(b.radius * 40, 2000) : 5000,
-      };
-    };
 
     const onWheelCapture = (event: WheelEvent) => {
       const controls = controlsRef.current;
       if (!controls) return;
-
       event.preventDefault();
       event.stopImmediatePropagation();
-
       if (isFollowingRef.current) return;
-
       animRef.current = null;
-      flushControlsInertia(controls);
 
       const rect = domElement.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
-
-      // Normalize wheel delta across mouse wheel lines, pages, and smooth trackpads
       let rawDelta = event.deltaY;
       if (event.deltaMode === 1) rawDelta *= 24;
       else if (event.deltaMode === 2) rawDelta *= rect.height;
-
       const normalized = Math.max(-3, Math.min(3, rawDelta / 100));
       if (Math.abs(normalized) < 1e-5) return;
+      let factor = Math.exp(normalized * (event.ctrlKey ? 0.015 : 0.14));
 
-      // Ctrl + wheel = 10% fine zoom step (also tames browser pinch-to-zoom wheel events)
-      const zoomScale = event.ctrlKey ? 0.015 : 0.14;
-      let factor = Math.exp(normalized * zoomScale);
-
-      // Compute cursor NDC
       _tmpNdc.set(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,
         -((event.clientY - rect.top) / rect.height) * 2 + 1
       );
       _tmpRaycaster.setFromCamera(_tmpNdc, camera);
-
-      // Prefer exact surface hit under cursor; fallback to camera-facing plane through target
       let hasAnchor = false;
       const root = modelRootRef.current;
       if (root) {
-        const hits = _tmpRaycaster.intersectObject(root, true);
-        for (const hit of hits) {
+        for (const hit of _tmpRaycaster.intersectObject(root, true)) {
           if (hit.object instanceof THREE.Mesh && hit.object.visible) {
             _tmpAnchor.copy(hit.point);
             hasAnchor = true;
@@ -470,36 +453,26 @@ export function CameraController({
           }
         }
       }
-
       if (!hasAnchor) {
         _tmpDir.copy(controls.target).sub(camera.position);
-        if (_tmpDir.lengthSq() < 1e-8) {
-          _tmpDir.set(0, 0, -1);
-        } else {
-          _tmpDir.normalize();
-        }
+        if (_tmpDir.lengthSq() < 1e-8) _tmpDir.set(0, 0, -1);
+        else _tmpDir.normalize();
         _tmpPlane.setFromNormalAndCoplanarPoint(_tmpDir, controls.target);
-        const hitPlane = _tmpRaycaster.ray.intersectPlane(_tmpPlane, _tmpAnchor);
-        if (!hitPlane) {
+        if (!_tmpRaycaster.ray.intersectPlane(_tmpPlane, _tmpAnchor)) {
           _tmpAnchor.copy(controls.target);
         }
       }
 
+      const b = boundsRef.current;
+      const minDist = b ? Math.max(b.radius * 0.02, 0.2) : 0.2;
+      const maxDist = b ? Math.max(b.radius * 40, 2000) : 5000;
       const currentDist = camera.position.distanceTo(controls.target);
-      const { minDist, maxDist } = getMinMaxDistance();
       const targetDist = currentDist * factor;
+      if (targetDist < minDist) factor = minDist / Math.max(currentDist, 1e-6);
+      else if (targetDist > maxDist) factor = maxDist / Math.max(currentDist, 1e-6);
 
-      if (targetDist < minDist) {
-        factor = minDist / Math.max(currentDist, 1e-6);
-      } else if (targetDist > maxDist) {
-        factor = maxDist / Math.max(currentDist, 1e-6);
-      }
-
-      // Scale both camera.position and controls.target toward cursor anchor so the
-      // 3D point under the cursor remains pixel-locked during zoom
       _tmpNewPos.copy(camera.position).sub(_tmpAnchor).multiplyScalar(factor).add(_tmpAnchor);
       _tmpNewTarget.copy(controls.target).sub(_tmpAnchor).multiplyScalar(factor).add(_tmpAnchor);
-
       camera.position.copy(_tmpNewPos);
       controls.target.copy(_tmpNewTarget);
       camera.lookAt(controls.target);
@@ -510,124 +483,62 @@ export function CameraController({
         event.stopImmediatePropagation();
         return;
       }
-
-      const controls = controlsRef.current;
-      if (!controls) return;
-
-      // Only intercept mouse/pen left button when Shift is held (pan) or on outer roll ring
-      if (event.pointerType === 'touch' || event.button !== 0) return;
-
-      const viewerState = useViewerStore.getState();
-      const isToolActive =
-        viewerState.annotationMode || viewerState.measurementMode !== 'none';
-
-      // SHIFT + LEFT = screen-plane pan (P0 #3)
+      if (!controlsRef.current || event.pointerType === 'touch' || event.button !== 0) return;
       if (event.shiftKey) {
         event.preventDefault();
         event.stopImmediatePropagation();
         animRef.current = null;
-        flushControlsInertia(controls);
-        activeCustomDrag = 'shift-pan';
+        shiftPanActive = true;
         lastClientX = event.clientX;
         lastClientY = event.clientY;
         domElement.setPointerCapture?.(event.pointerId);
-        return;
-      }
-
-      // Outer perimeter ring LEFT drag = direct screen-Z roll (P0 #1, trackball mode only)
-      if (cameraControlMode === 'trackball' && !isToolActive) {
-        const rect = domElement.getBoundingClientRect();
-        const cx = rect.left + rect.width * 0.5;
-        const cy = rect.top + rect.height * 0.5;
-        const halfMin = Math.max(Math.min(rect.width, rect.height) * 0.5, 1);
-        const nx = (event.clientX - cx) / halfMin;
-        const ny = (event.clientY - cy) / halfMin;
-        const radiusRatio = Math.hypot(nx, ny);
-
-        if (radiusRatio >= OUTER_ROLL_RING_RATIO) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          animRef.current = null;
-          flushControlsInertia(controls);
-          activeCustomDrag = 'screen-roll';
-          lastRollAngle = Math.atan2(event.clientY - cy, event.clientX - cx);
-          domElement.setPointerCapture?.(event.pointerId);
-        }
       }
     };
 
     const onPointerMoveWindow = (event: PointerEvent) => {
-      if (activeCustomDrag === 'none') return;
+      if (!shiftPanActive) return;
       const controls = controlsRef.current;
       if (!controls || isFollowingRef.current) {
-        activeCustomDrag = 'none';
+        shiftPanActive = false;
         return;
       }
+      const dx = event.clientX - lastClientX;
+      const dy = event.clientY - lastClientY;
+      lastClientX = event.clientX;
+      lastClientY = event.clientY;
 
-      if (activeCustomDrag === 'shift-pan') {
-        const dx = event.clientX - lastClientX;
-        const dy = event.clientY - lastClientY;
-        lastClientX = event.clientX;
-        lastClientY = event.clientY;
+      const rect = domElement.getBoundingClientRect();
+      const dist = camera.position.distanceTo(controls.target);
+      const fovRad =
+        camera instanceof THREE.PerspectiveCamera
+          ? THREE.MathUtils.degToRad(camera.fov)
+          : THREE.MathUtils.degToRad(40);
+      const worldPerPx =
+        (2 * dist * Math.tan(fovRad / 2)) / (Math.max(rect.height, 1) * Math.max(camera.zoom, 1e-4));
 
-        const rect = domElement.getBoundingClientRect();
-        const viewportHeight = Math.max(rect.height, 1);
-        const dist = camera.position.distanceTo(controls.target);
-        const fovRad =
-          camera instanceof THREE.PerspectiveCamera
-            ? THREE.MathUtils.degToRad(camera.fov)
-            : THREE.MathUtils.degToRad(40);
-        const worldPerPx = (2 * dist * Math.tan(fovRad / 2)) / (viewportHeight * Math.max(camera.zoom, 1e-4));
-
-        // Camera screen basis respecting arbitrary rolled camera.up
-        _tmpEye.copy(camera.position).sub(controls.target).normalize();
-        _tmpUp.copy(camera.up).normalize();
-        _tmpRight.crossVectors(_tmpUp, _tmpEye).normalize();
-        _tmpUp.crossVectors(_tmpEye, _tmpRight).normalize();
-
-        _tmpDelta
-          .set(0, 0, 0)
-          .addScaledVector(_tmpRight, -dx * worldPerPx)
-          .addScaledVector(_tmpUp, dy * worldPerPx);
-
-        camera.position.add(_tmpDelta);
-        controls.target.add(_tmpDelta);
-        camera.lookAt(controls.target);
-        return;
-      }
-
-      if (activeCustomDrag === 'screen-roll') {
-        const rect = domElement.getBoundingClientRect();
-        const cx = rect.left + rect.width * 0.5;
-        const cy = rect.top + rect.height * 0.5;
-        const nextAngle = Math.atan2(event.clientY - cy, event.clientX - cx);
-        let deltaAngle = nextAngle - lastRollAngle;
-        if (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2;
-        if (deltaAngle < -Math.PI) deltaAngle += Math.PI * 2;
-        lastRollAngle = nextAngle;
-
-        if (Math.abs(deltaAngle) > 1e-6) {
-          _tmpEye.copy(camera.position).sub(controls.target).normalize();
-          _tmpQuat.setFromAxisAngle(_tmpEye, deltaAngle);
-          camera.up.applyQuaternion(_tmpQuat).normalize();
-          camera.lookAt(controls.target);
-        }
-      }
+      _tmpEye.copy(camera.position).sub(controls.target).normalize();
+      _tmpUp.copy(camera.up).normalize();
+      _tmpRight.crossVectors(_tmpUp, _tmpEye).normalize();
+      _tmpUp.crossVectors(_tmpEye, _tmpRight).normalize();
+      _tmpDelta
+        .set(0, 0, 0)
+        .addScaledVector(_tmpRight, -dx * worldPerPx)
+        .addScaledVector(_tmpUp, dy * worldPerPx);
+      camera.position.add(_tmpDelta);
+      controls.target.add(_tmpDelta);
+      camera.lookAt(controls.target);
     };
 
     const onPointerUpWindow = (event: PointerEvent) => {
-      if (activeCustomDrag === 'none') return;
-      activeCustomDrag = 'none';
+      if (!shiftPanActive) return;
+      shiftPanActive = false;
       if (domElement.hasPointerCapture?.(event.pointerId)) {
         domElement.releasePointerCapture(event.pointerId);
       }
-      flushControlsInertia(controlsRef.current);
     };
 
     const onMouseDownPreventMiddleScroll = (event: MouseEvent) => {
-      if (event.button === 1) {
-        event.preventDefault();
-      }
+      if (event.button === 1) event.preventDefault();
     };
 
     domElement.addEventListener('mousedown', onMouseDownPreventMiddleScroll);
@@ -647,6 +558,22 @@ export function CameraController({
     };
   }, [camera, gl, cameraControlMode, modelRootRef]);
 
+  // Free camera: follow mode must also block its pointer handlers (the turntable
+  // effect above does this for OrbitControls via stopImmediatePropagation).
+  React.useEffect(() => {
+    if (cameraControlMode !== 'trackball') return;
+    const domElement = gl.domElement;
+    const blockWhileFollowing = (event: Event) => {
+      if (isFollowingRef.current) event.stopImmediatePropagation();
+    };
+    domElement.addEventListener('pointerdown', blockWhileFollowing, { capture: true });
+    domElement.addEventListener('wheel', blockWhileFollowing, { capture: true });
+    return () => {
+      domElement.removeEventListener('pointerdown', blockWhileFollowing, { capture: true });
+      domElement.removeEventListener('wheel', blockWhileFollowing, { capture: true });
+    };
+  }, [gl, cameraControlMode]);
+
   // Keyboard shortcuts: Q / E roll camera ±15° around view axis (P1 #6)
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -660,6 +587,10 @@ export function CameraController({
       } else if (event.code === 'KeyE') {
         event.preventDefault();
         useViewerStore.getState().requestCameraRoll(15);
+      } else if (event.code === 'KeyF') {
+        // Fit to view: the only thing (with presets / view cube) that re-centers.
+        event.preventDefault();
+        useViewerStore.getState().requestCameraPreset('fit');
       }
     };
 
@@ -667,33 +598,18 @@ export function CameraController({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  const applyPreset = React.useCallback(
-    (preset: CameraPreset, immediate = false) => {
+  /**
+   * Frames the whole model looking along -`dir` (camera placed on the +`dir`
+   * side) with `up`, and resets the orbit pivot to the model center. Used by
+   * Fit, the toolbar presets and the view cube: the "I'm lost, reset" path.
+   */
+  const applyView = React.useCallback(
+    (dir: THREE.Vector3, targetUp: THREE.Vector3, immediate = false) => {
       const currentBounds = boundsRef.current;
       if (!currentBounds) return;
 
       const aspect = sizeRef.current.width / Math.max(sizeRef.current.height, 1);
-
-      let dir: THREE.Vector3;
-      let targetUp: THREE.Vector3;
-
-      if (preset === 'fit') {
-        // Fit bounding box while preserving current view direction & rolled camera-up
-        const curTarget = controlsRef.current?.target ?? targetRef.current;
-        dir = camera.position.clone().sub(curTarget);
-        if (dir.lengthSq() < 1e-6) {
-          dir.set(1, 0.78, 1);
-        }
-        dir.normalize();
-        targetUp = orthogonalizeUp(dir, camera.up);
-      } else {
-        const orientation = getPresetOrientation(preset);
-        dir = orientation.dir;
-        targetUp =
-          cameraControlMode === 'orbit'
-            ? new THREE.Vector3(0, 1, 0)
-            : orientation.up;
-      }
+      resetPivot(controlsRef.current, currentBounds.center);
 
       const dist = computeFitDistanceForBox(
         currentBounds.box,
@@ -718,7 +634,6 @@ export function CameraController({
         camera.updateProjectionMatrix();
         if (controlsRef.current) {
           controlsRef.current.target.copy(currentBounds.center);
-          flushControlsInertia(controlsRef.current);
         }
         targetRef.current.copy(currentBounds.center);
         camera.lookAt(currentBounds.center);
@@ -727,8 +642,40 @@ export function CameraController({
         startAnimation(nextPos, currentBounds.center, targetUp, 1, PRESET_ANIMATION_MS);
       }
     },
-    [camera, cameraControlMode, startAnimation]
+    [camera, startAnimation]
   );
+
+  const applyPreset = React.useCallback(
+    (preset: CameraPreset, immediate = false) => {
+      if (preset === 'fit') {
+        // Fit bounding box while preserving current view direction & rolled camera-up
+        const curTarget = controlsRef.current?.target ?? targetRef.current;
+        const dir = camera.position.clone().sub(curTarget);
+        if (dir.lengthSq() < 1e-6) dir.set(1, 0.78, 1);
+        dir.normalize();
+        applyView(dir, orthogonalizeUp(dir, camera.up), immediate);
+        return;
+      }
+      const orientation = getPresetOrientation(preset);
+      applyView(
+        orientation.dir,
+        cameraControlMode === 'orbit' ? new THREE.Vector3(0, 1, 0) : orientation.up,
+        immediate
+      );
+    },
+    [camera, cameraControlMode, applyView]
+  );
+
+  // View cube: arbitrary face / edge / corner direction
+  React.useEffect(() => {
+    if (!cameraViewCommand || !boundsRef.current || isFollowingRef.current) return;
+    const dir = new THREE.Vector3(...cameraViewCommand.dir).normalize();
+    const up =
+      cameraControlMode === 'orbit'
+        ? new THREE.Vector3(0, 1, 0)
+        : new THREE.Vector3(...cameraViewCommand.up);
+    applyView(dir, up, false);
+  }, [cameraViewCommand, cameraControlMode, applyView]);
 
   // Initial framing on model load
   React.useEffect(() => {
@@ -840,6 +787,7 @@ export function CameraController({
     const dist = computeFitDistanceForBox(targetBox, viewDir, preferredUp, camera, aspect, 1.35);
     const endPos = boxCenter.clone().addScaledVector(viewDir, dist);
 
+    resetPivot(controlsRef.current, boxCenter);
     startAnimation(endPos, boxCenter, preferredUp, 1, PRESET_ANIMATION_MS);
   }, [normalToSelectionCommand, camera, cameraControlMode, modelRootRef, startAnimation]);
 
@@ -872,6 +820,7 @@ export function CameraController({
     const dist = computeFitDistanceForBox(partBox, viewDir, upVec, camera, aspect, 1.35);
     const endPos = boxCenter.clone().addScaledVector(viewDir, dist);
 
+    resetPivot(controlsRef.current, boxCenter);
     startAnimation(endPos, boxCenter, upVec, 1, PRESET_ANIMATION_MS);
   }, [zoomToPartCommand, camera, cameraControlMode, modelRootRef, startAnimation]);
 
@@ -886,6 +835,8 @@ export function CameraController({
       dir.lengthSq() > 1e-6
         ? orthogonalizeUp(dir, new THREE.Vector3(0, 1, 0))
         : new THREE.Vector3(0, 1, 0);
+    // Annotation / comment saved view: orbit around the saved focus point.
+    resetPivot(controlsRef.current, endTarget);
     startAnimation(endPos, endTarget, endUp, pose.zoom, 500);
   }, [cameraPoseCommand, startAnimation]);
 
@@ -932,8 +883,11 @@ export function CameraController({
       camera.position.lerpVectors(anim.startPos, anim.endPos, easedT);
       controls.target.lerpVectors(anim.startTarget, anim.endTarget, easedT);
 
-      // Smoothly interpolate camera.up while keeping it orthogonal to the view ray
-      _tmpUp.lerpVectors(anim.startUp, anim.endUp, easedT);
+      // Rotate camera.up along the arc from startUp to endUp (a linear lerp would
+      // collapse to zero when undoing a 180° free roll), kept orthogonal to the view ray
+      _tmpQuat.setFromUnitVectors(anim.startUp, anim.endUp);
+      _tmpQuat2.identity().slerp(_tmpQuat, easedT);
+      _tmpUp.copy(anim.startUp).applyQuaternion(_tmpQuat2);
       _tmpEye.copy(camera.position).sub(controls.target);
       if (_tmpEye.lengthSq() > 1e-8) {
         _tmpEye.normalize();
@@ -955,7 +909,6 @@ export function CameraController({
         camera.updateProjectionMatrix();
         camera.lookAt(controls.target);
         animRef.current = null;
-        flushControlsInertia(controls);
       }
     } else {
       controls.update();
@@ -971,5 +924,78 @@ export function CameraController({
     });
   });
 
-  return null;
+  // View cube (separate canvas) and dev/e2e hooks read the main camera from here.
+  React.useEffect(() => {
+    return publishViewerCamera({
+      camera,
+      getPivot: () => {
+        const controls = controlsRef.current;
+        return isFreeControls(controls) ? controls.pivot.clone() : null;
+      },
+      getTarget: () => (controlsRef.current?.target ?? targetRef.current).clone(),
+      getModelCenter: () => boundsRef.current?.center.clone() ?? null,
+    });
+  }, [camera]);
+
+  return <PivotMarker controlsRef={controlsRef} boundsRef={boundsRef} />;
+}
+
+const _markerScale = new THREE.Vector3();
+
+/**
+ * Small crosshair at the free-orbit pivot, shown only when the pivot is not the
+ * model center (i.e. after a pivot-on-drag or a pan). Constant on-screen size,
+ * drawn on top, and excluded from raycasts so it never affects picking.
+ */
+function PivotMarker({
+  controlsRef,
+  boundsRef,
+}: {
+  controlsRef: React.RefObject<ActiveControls | null>;
+  boundsRef: React.RefObject<ModelBounds | null>;
+}) {
+  const groupRef = React.useRef<THREE.Group>(null);
+  const { camera, size } = useThree();
+  const viewportHeightRef = React.useRef(size.height);
+  viewportHeightRef.current = size.height;
+  const noRaycast = React.useCallback(() => null, []);
+
+  useFrame(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    const controls = controlsRef.current;
+    const b = boundsRef.current;
+    if (!isFreeControls(controls) || !b) {
+      group.visible = false;
+      return;
+    }
+    const offCenter = controls.pivot.distanceTo(b.center) > Math.max(b.radius * 0.005, 1e-4);
+    group.visible = offCenter;
+    if (!offCenter) return;
+    group.position.copy(controls.pivot);
+    group.quaternion.copy(camera.quaternion);
+    // Ring radius ~7 px on screen regardless of distance
+    const depth = Math.max(camera.position.distanceTo(controls.pivot), 1e-3);
+    const fov =
+      camera instanceof THREE.PerspectiveCamera ? THREE.MathUtils.degToRad(camera.fov) : 0.7;
+    const s = (2 * depth * Math.tan(fov / 2) * 8) / Math.max(viewportHeightRef.current, 1);
+    group.scale.copy(_markerScale.set(s, s, s));
+  });
+
+  return (
+    <group ref={groupRef} visible={false} renderOrder={1000}>
+      <mesh raycast={noRaycast} renderOrder={1000}>
+        <ringGeometry args={[0.55, 0.85, 24]} />
+        <meshBasicMaterial color="#f59e0b" depthTest={false} depthWrite={false} transparent />
+      </mesh>
+      <mesh raycast={noRaycast} renderOrder={1000}>
+        <planeGeometry args={[2.2, 0.16]} />
+        <meshBasicMaterial color="#f59e0b" depthTest={false} depthWrite={false} transparent />
+      </mesh>
+      <mesh raycast={noRaycast} renderOrder={1000}>
+        <planeGeometry args={[0.16, 2.2]} />
+        <meshBasicMaterial color="#f59e0b" depthTest={false} depthWrite={false} transparent />
+      </mesh>
+    </group>
+  );
 }

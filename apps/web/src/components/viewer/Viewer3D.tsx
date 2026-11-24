@@ -27,6 +27,7 @@ import {
   CameraController,
   type ModelBounds,
 } from '@/components/viewer/CameraController';
+import { ViewCubeOverlay } from '@/components/viewer/ViewCube';
 import {
   AnnotationsLayer,
   AnnotationsPinOverlay,
@@ -851,6 +852,7 @@ export function Viewer3D({
         }`}
       >
         <Canvas
+          data-testid="viewer-3d-canvas"
           shadows
           dpr={[1, 2]}
           camera={{ position: [120, 90, 120], fov: 40, near: 0.1, far: 25000 }}
@@ -968,6 +970,9 @@ export function Viewer3D({
             />
           </GizmoHelper>
         </Canvas>
+
+        {/* View orientation cube (own canvas, top-right) + SPACE large cube + controls help */}
+        <ViewCubeOverlay />
 
         {/* React-19-safe DOM overlay for interactive 3D annotation pins */}
         <AnnotationsPinOverlay

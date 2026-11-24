@@ -85,6 +85,12 @@ interface ViewerState {
   commentFilters: CommentFilters;
 
   cameraCommand: { preset: CameraPreset; seq: number } | null;
+  /** View cube: look along -dir (camera on the +dir side) with the given up. */
+  cameraViewCommand: {
+    dir: [number, number, number];
+    up: [number, number, number];
+    seq: number;
+  } | null;
   cameraPoseCommand: { pose: AnnotationCameraPose; seq: number } | null;
   cameraRollCommand: { deltaDeg: number; seq: number } | null;
   normalToSelectionCommand: { seq: number } | null;
@@ -121,6 +127,7 @@ interface ViewerState {
   setCommentFilters: (patch: Partial<CommentFilters>) => void;
 
   requestCameraPreset: (preset: CameraPreset) => void;
+  requestCameraView: (dir: [number, number, number], up: [number, number, number]) => void;
   requestCameraPose: (pose: AnnotationCameraPose) => void;
   requestCameraRoll: (deltaDeg: number) => void;
   requestNormalToSelection: () => void;
@@ -180,6 +187,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   commentFilters: { versionId: undefined, onlyUnresolved: false },
 
   cameraCommand: null,
+  cameraViewCommand: null,
   cameraPoseCommand: null,
   cameraRollCommand: null,
   normalToSelectionCommand: null,
@@ -406,6 +414,11 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   requestCameraPreset: (preset) =>
     set((state) => ({
       cameraCommand: { preset, seq: (state.cameraCommand?.seq ?? 0) + 1 },
+    })),
+
+  requestCameraView: (dir, up) =>
+    set((state) => ({
+      cameraViewCommand: { dir, up, seq: (state.cameraViewCommand?.seq ?? 0) + 1 },
     })),
 
   requestCameraPose: (pose) =>

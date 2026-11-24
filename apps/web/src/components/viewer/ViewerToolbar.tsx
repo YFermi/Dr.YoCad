@@ -154,7 +154,7 @@ export function ViewerToolbar({ canAnnotate = true }: ViewerToolbarProps) {
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
-                Trackball (CAD)
+                Free (CAD)
               </button>
               <button
                 type="button"
@@ -172,14 +172,16 @@ export function ViewerToolbar({ canAnnotate = true }: ViewerToolbarProps) {
           </div>
 
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[10px] text-muted-foreground">
-            <span>Left drag: {cameraControlMode === 'trackball' ? 'Free tumble' : 'Turntable orbit'}</span>
+            <span>Left drag: {cameraControlMode === 'trackball' ? 'Orbit around the pressed point' : 'Turntable orbit'}</span>
             <span>Wheel: Zoom to cursor</span>
             <span>Middle / Shift+Left: Pan</span>
             <span>Ctrl+Wheel: Fine zoom (10%)</span>
             {cameraControlMode === 'trackball' ? (
               <>
-                <span>Outer ring / Q, E: Roll ±15°</span>
-                <span>Right drag: Smooth dolly</span>
+                <span>Edge drag / Q, E: Roll (±15°)</span>
+                <span>Right drag: Dolly · F: Fit</span>
+                <span>Space: View cube</span>
+                <span>Double-click part: Focus</span>
               </>
             ) : (
               <>
@@ -201,7 +203,7 @@ export function ViewerToolbar({ canAnnotate = true }: ViewerToolbarProps) {
               type="button"
               onClick={() => requestCameraPreset(preset.value)}
               className="rounded px-1.5 py-1.5 font-mono text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
-              title={`${preset.label} view (400ms smooth transition)`}
+              title={`${preset.label} view: snaps the orientation, re-centers the orbit pivot on the model and fits it (use this when you are lost)`}
             >
               {preset.shortLabel ?? preset.label}
             </button>
@@ -370,7 +372,7 @@ export function ViewerToolbar({ canAnnotate = true }: ViewerToolbarProps) {
               ? 'bg-primary/15 text-primary'
               : 'text-muted-foreground hover:bg-accent hover:text-foreground'
           )}
-          title={`Navigation mode: ${cameraControlMode === 'trackball' ? 'Free Trackball (SOLIDWORKS)' : 'Turntable Orbit'}. Click to switch.`}
+          title={`Navigation mode: ${cameraControlMode === 'trackball' ? 'Free (pivot on the point you drag, full rotation and roll)' : 'Turntable Orbit'}. Click to switch.`}
           aria-label="Navigation mode settings"
         >
           <Orbit className="h-3.5 w-3.5" />
@@ -383,7 +385,7 @@ export function ViewerToolbar({ canAnnotate = true }: ViewerToolbarProps) {
           type="button"
           onClick={() => requestCameraPreset('fit')}
           className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
-          title="Fit model bounding box to view"
+          title="Fit to view (F): frame the whole model and re-center the orbit pivot, keeping the current orientation"
           aria-label="Fit to view"
         >
           <Maximize2 className="h-3.5 w-3.5" />
