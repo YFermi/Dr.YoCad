@@ -22,6 +22,20 @@
   --input: #243044;
   --ring: #0b5fff;
   --radius: 0.5rem;
+
+  /* 3D measurement dimensions (DimensionOverlay2D) */
+  --dimension-session: #3b82f6;
+  --dimension-persisted: #f59e0b;
+  --dimension-label-bg: #0b0e14cc;
+  --dimension-label-border: rgb(148 163 184 / 0.35);
+}
+
+/* Not used yet (the app is dark-only); ready for a light theme on <html class="light">. */
+html.light {
+  --dimension-session: #2563eb;
+  --dimension-persisted: #d97706;
+  --dimension-label-bg: #ffffffcc;
+  --dimension-label-border: rgb(15 23 42 / 0.2);
 }
 
 @theme inline {

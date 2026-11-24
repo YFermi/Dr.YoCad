@@ -28,6 +28,7 @@ import {
   type ModelBounds,
 } from '@/components/viewer/CameraController';
 import { ViewCubeOverlay } from '@/components/viewer/ViewCube';
+import { DimensionOverlay2D } from '@/components/viewer/DimensionOverlay2D';
 import {
   AnnotationsLayer,
   AnnotationsPinOverlay,
@@ -617,7 +618,7 @@ function ModelScene({
   );
 }
 
-// Session 7 Smart Measurement overlay is rendered via MeasureOverlay3D + MeasureLabelOverlay.
+// Session 7 Smart Measurement overlay: MeasureOverlay3D (feature highlights) + DimensionOverlay2D + MeasureLabelOverlay.
 
 
 
@@ -808,7 +809,6 @@ export function Viewer3D({
   const annotationMode = useViewerStore((s) => s.annotationMode);
   const remoteCursors = useCursorStore((s) => s.cursors);
 
-  const labelElementsRef = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const pinElementsRef = React.useRef<Map<string, HTMLButtonElement>>(new Map());
   const remoteCursorLabelsRef = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const draftPinRef = React.useRef<HTMLDivElement | null>(null);
@@ -927,10 +927,7 @@ export function Viewer3D({
             draftPinRef={draftPinRef}
           />
 
-          <MeasureOverlay3D
-            markerRadius={markerRadius}
-            labelElementsRef={labelElementsRef}
-          />
+          <MeasureOverlay3D />
 
           <RemoteCursors3D labelElementsRef={remoteCursorLabelsRef} />
 
@@ -1003,12 +1000,11 @@ export function Viewer3D({
           </div>
         )}
 
-        {/* React-19-safe DOM overlay for Smart Measurements, Quick Measure tooltip, and edit popup */}
-        <MeasureLabelOverlay
-          fileId={fileId}
-          canEdit={canEditMeasurements}
-          labelElementsRef={labelElementsRef}
-        />
+        {/* Measurement dimensions: screen-space engineering style (lines, arrows, labels) */}
+        <DimensionOverlay2D canEdit={canEditMeasurements} />
+
+        {/* React-19-safe DOM overlay for the Quick Measure tooltip and edit popup */}
+        <MeasureLabelOverlay fileId={fileId} canEdit={canEditMeasurements} />
 
         {/* React-19-safe DOM loading overlay while GLB geometry streams in */}
         {!bounds && (

@@ -21,6 +21,8 @@ declare global {
     __viewer?: ViewerCameraHandle & {
       /** Client-space centre of a view cube region, for e2e clicks (dev only). */
       viewCubePoint?: (region: string) => { x: number; y: number } | null;
+      /** Same for the large (SPACE) view cube (dev only). */
+      viewCubeLargePoint?: (region: string) => { x: number; y: number } | null;
     };
   }
 }
