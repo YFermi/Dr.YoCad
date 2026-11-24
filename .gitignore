@@ -29,3 +29,7 @@ Thumbs.db
 
 # STANDALONE mode data (SQLite db + uploaded files), see STANDALONE.md
 /data/
+
+# Playwright output
+test-results/
+playwright-report/
