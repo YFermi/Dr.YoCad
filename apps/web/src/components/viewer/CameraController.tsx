@@ -934,8 +934,9 @@ export function CameraController({
       },
       getTarget: () => (controlsRef.current?.target ?? targetRef.current).clone(),
       getModelCenter: () => boundsRef.current?.center.clone() ?? null,
+      getModelRoot: () => modelRootRef.current,
     });
-  }, [camera]);
+  }, [camera, modelRootRef]);
 
   return <PivotMarker controlsRef={controlsRef} boundsRef={boundsRef} />;
 }

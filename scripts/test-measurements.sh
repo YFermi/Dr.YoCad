@@ -92,7 +92,7 @@ upload_and_wait_ready() {
   echo "${file_id}|${version_id}"
 }
 
-echo "Testing Cadline Session 7 Smart Measurement system against ${API_URL}"
+echo "Testing Dr.Yo CAD Session 7 Smart Measurement system against ${API_URL}"
 echo "------------------------------------------------------------"
 
 # 1. Run pure geometry unit tests

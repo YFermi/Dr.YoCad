@@ -91,7 +91,7 @@ async function buildServer() {
   await fastify.register(swagger, {
     openapi: {
       info: {
-        title: 'Cadline Design Review API',
+        title: 'Dr.Yo CAD Design Review API',
         description:
           'Session 3 API for auth, projects, chunked uploads, CAD conversion, 3D annotations, threaded comments, and persisted measurements.',
         version: '0.3.0',

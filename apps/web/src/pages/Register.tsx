@@ -65,7 +65,7 @@ export function RegisterPage() {
             <Layers className="h-5 w-5" />
           </div>
           <span className="font-display text-xl font-bold tracking-tight text-foreground">
-            Cadline
+            Dr.Yo CAD
           </span>
         </div>
 

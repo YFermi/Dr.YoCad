@@ -250,7 +250,7 @@ export function triangleMeshDataToBufferGeometry(mesh: TriangleMeshData): THREE.
 }
 
 /**
- * Resolves the canonical Cadline partId for a Three.js Mesh in a loaded GLB scene.
+ * Resolves the canonical Dr.Yo CAD partId for a Three.js Mesh in a loaded GLB scene.
  */
 export function resolvePartIdForMesh(mesh: THREE.Mesh, fallbackIndex: number): string {
   const userDataPartId =

@@ -10,6 +10,8 @@ export interface ViewerCameraHandle {
   getPivot: () => THREE.Vector3 | null;
   getTarget: () => THREE.Vector3;
   getModelCenter: () => THREE.Vector3 | null;
+  /** Root of the loaded model (dev / e2e inspection of part meshes). */
+  getModelRoot: () => THREE.Object3D | null;
 }
 
 let current: ViewerCameraHandle | null = null;

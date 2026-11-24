@@ -42,7 +42,7 @@ export function ShareViewPage() {
           </p>
           <div className="pt-2">
             <Link to="/login">
-              <Button size="sm">Sign in to Cadline</Button>
+              <Button size="sm">Sign in to Dr.Yo CAD</Button>
             </Link>
           </div>
         </div>

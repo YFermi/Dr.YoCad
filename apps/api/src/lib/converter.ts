@@ -5,6 +5,7 @@ import type {
   PartNode,
   PdfPageManifest,
 } from '@cadline/shared';
+import { isSolidWorksNativeFile, SOLIDWORKS_NATIVE_UNSUPPORTED_MESSAGE } from '@cadline/shared';
 import { downloadObjectBuffer, uploadObjectBuffer } from './storage.js';
 import {
   DWG_UNSUPPORTED_REASON,
@@ -43,6 +44,11 @@ export async function convertToGlb(
   inputKey: string,
   outputKey: string
 ): Promise<Conversion3DResult> {
+  // SolidWorks native files cannot be read without a commercial converter: fail
+  // with export guidance instead of attempting a parse.
+  if (isSolidWorksNativeFile(inputKey)) {
+    return { status: 'failed', reason: SOLIDWORKS_NATIVE_UNSUPPORTED_MESSAGE };
+  }
   try {
     const rawBuffer = await downloadObjectBuffer(inputKey);
     const artifact = await convertUploadedBuffer(rawBuffer, path.basename(inputKey));

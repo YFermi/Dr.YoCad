@@ -14,6 +14,7 @@ import type { PartNode } from '@cadline/shared';
 import { useViewerStore } from '@/stores/viewerStore';
 import { useMeasureStore } from '@/stores/measureStore';
 import { cn } from '@/lib/utils';
+import { countLeafParts } from '@/lib/partTree';
 
 interface PartTreeProps {
   fallbackName?: string;
@@ -95,6 +96,14 @@ function PartTreeRow({
               <Box className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             )}
             <span className="truncate">{node.name}</span>
+            {hasChildren && (
+              <span
+                className="shrink-0 rounded bg-muted px-1 font-mono text-[10px] tabular-nums text-muted-foreground"
+                title={`${countLeafParts(node)} parts in this assembly`}
+              >
+                {countLeafParts(node)}
+              </span>
+            )}
           </button>
         </div>
 

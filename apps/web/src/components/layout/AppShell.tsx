@@ -52,7 +52,7 @@ export function AppShell({
               to="/projects"
               className="font-display text-base font-bold tracking-tight text-foreground whitespace-nowrap shrink-0"
             >
-              Cadline
+              Dr.Yo CAD
             </Link>
 
             {breadcrumbs.length > 0 && (

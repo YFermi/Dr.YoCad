@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ExternalLink, RefreshCw } from 'lucide-react';
 import {
   FileStatus,
   MeasurementType,
@@ -12,6 +12,7 @@ import {
   type MeasurementPoint3D,
   type PartNode,
 } from '@cadline/shared';
+import { isSolidWorksNativeFile, SOLIDWORKS_EXPORT_HELP_URL } from '@cadline/shared';
 import { apiFetch } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth';
 import { useViewerStore } from '@/stores/viewerStore';
@@ -329,7 +330,18 @@ export function ViewerLoader({
               'The CAD converter could not process this file format.'}
           </p>
         </div>
-        {!shareToken && (
+        {isSolidWorksNativeFile(fileName) ? (
+          // Retrying cannot help: the format needs a commercial converter.
+          <a
+            href={SOLIDWORKS_EXPORT_HELP_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+          >
+            How to export from SolidWorks
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        ) : !shareToken && (
           <Button
             size="sm"
             variant="outline"

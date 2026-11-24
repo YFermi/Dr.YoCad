@@ -1,6 +1,6 @@
 # STANDALONE mode
 
-`npm run dev:standalone` runs the whole app as two local processes (API on :4000, Vite on :5173) with no Docker, no Postgres, no Redis, no S3, no `.env` file and no login. It is the default way to develop Cadline. The full stack (README, "Full stack (advanced)") is unchanged and remains what you deploy.
+`npm run dev:standalone` runs the whole app as two local processes (API on :4000, Vite on :5173) with no Docker, no Postgres, no Redis, no S3, no `.env` file and no login. It is the default way to develop Dr.Yo CAD. The full stack (README, "Full stack (advanced)") is unchanged and remains what you deploy.
 
 ## How it is switched on
 

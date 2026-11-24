@@ -136,7 +136,7 @@ function isSocketAuthUser(value: unknown): value is SocketAuthUser {
 }
 
 /**
- * Attaches the Cadline Session 5 real-time collaboration hub to any Socket.IO Server instance.
+ * Attaches the Dr.Yo CAD Session 5 real-time collaboration hub to any Socket.IO Server instance.
  * Pure fan-out and ephemeral relay — NEVER writes to the database.
  */
 export function attachCollaborationHub(

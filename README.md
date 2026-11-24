@@ -1,4 +1,4 @@
-# Cadline — Browser-Based 2D/3D Design Review Platform
+# Dr.Yo CAD — Browser-Based 2D/3D Design Review Platform
 
 Design review for CAD files in the browser: 3D models (STEP/IGES/BREP via OpenCASCADE, STL, OBJ, GLB/glTF), 2D drawings (DXF, PDF), annotations, threaded comments, measurements, real-time collaboration, and an optional AI assistant.
 
@@ -31,6 +31,37 @@ There is one backend: `apps/api`. The web dev server proxies `/api` and `/socket
 STANDALONE mode is single-user and has no security. See [STANDALONE.md](STANDALONE.md) for what it changes, how to reset its data, and how to switch back.
 
 Smoke test, no services needed: `bash scripts/test-standalone.sh`. It starts `npm run dev:standalone` (or reuses one already on :4000), creates annotations and uploads an STL without any auth header, and checks that the converted GLB lands in `./data/files/`.
+
+## Supported formats
+
+| | Format | Extensions | Notes |
+| :-- | :--- | :--- | :--- |
+| ✅ | STEP | `.step`, `.stp` | Parts and assemblies. The model tree shows the assembly hierarchy with part counts; parts with no color in the file get a stable per-part color. |
+| ✅ | IGES | `.iges`, `.igs` | |
+| ✅ | OpenCASCADE BREP | `.brep` | |
+| ✅ | STL | `.stl` | ASCII and binary |
+| ✅ | OBJ | `.obj` | Geometry only |
+| ✅ | glTF | `.glb`, `.gltf` | `.gltf` must be self-contained (embedded buffers) |
+| ✅ | DXF (2D) | `.dxf` | Layers, markup, 2D measurements |
+| ✅ | PDF (2D) | `.pdf` | Each page is rendered as a sheet |
+| ❌ | SolidWorks native | `.sldprt`, `.sldasm` | Proprietary binary formats; reading them requires a commercial converter. Rejected before upload. [Export to STEP](#exporting-from-solidworks) instead. |
+| ❌ | Parasolid | `.x_t`, `.x_b` | Not supported: the open-source OpenCASCADE build used here (`occt-import-js` 0.0.23) reads STEP, IGES and BREP only. Export to STEP. |
+| ❌ | DWG | `.dwg` | Proprietary. Convert to DXF with the [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter) or [LibreDWG](https://www.gnu.org/software/libredwg/). |
+| ❌ | 3MF | `.3mf` | Not supported yet. |
+
+Anything not in the ✅ rows is refused at upload with a message; there is no "guess the format" fallback.
+
+### Exporting from SolidWorks
+
+Dr.Yo CAD cannot open `.sldprt` / `.sldasm` files directly. Export a STEP file from SolidWorks and upload that:
+
+1. Open the part or assembly in SolidWorks.
+2. **File → Save As**.
+3. In **Save as type**, choose **STEP AP214 (\*.step; \*.stp)** (AP242 also works).
+4. For assemblies, click **Options…** and make sure the export keeps the assembly structure (the default). This is what gives you the model tree, sub-assemblies and part counts.
+5. Save, then drag the `.step` file into a Dr.Yo CAD project.
+
+Colors set in SolidWorks are carried over by STEP AP214/AP242. Parts without a color get an automatic, stable color per part.
 
 ## Full stack (advanced)
 
@@ -73,7 +104,7 @@ With the full stack running (`docker compose up -d`, migrate, seed, and the API 
 bash scripts/test-all.sh
 ```
 
-`test-all.sh` waits for `/api/v1/health` and for the seeded files to finish converting, then runs all 7 suites against the Fastify API and exits non-zero if any fail:
+`test-all.sh` waits for `/api/v1/health` and for the seeded files to finish converting, then runs all 8 suites against the Fastify API and exits non-zero if any fail:
 
 | Suite | Covers |
 | :--- | :--- |
@@ -84,6 +115,7 @@ bash scripts/test-all.sh
 | `test-realtime-reconnect.sh` | reconnect and room rejoin |
 | `test-ai.sh` | AI endpoints: `503` without a key, `429` rate limits (live Gemini checks with `AI_TEST_KEY`) |
 | `test-measurements.sh` | upload → OCCT/STL conversion → GLB geometry checks, feature cache, smart measurements |
+| `test-assembly.sh` | STEP assembly → nested part tree (sub-assembly, 5 parts, duplicate names), per-part GLB colors; `.sldprt` via the API fails with the SolidWorks export guidance |
 
 Each suite also runs on its own, e.g. `API_URL=http://localhost:4000/api/v1 bash scripts/test-2d.sh` (`API_URL` defaults to that value). CI (`.github/workflows/ci.yml`) runs typecheck, build, and all suites on every push and pull request.
 

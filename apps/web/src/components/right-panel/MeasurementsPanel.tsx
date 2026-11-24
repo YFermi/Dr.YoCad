@@ -30,6 +30,7 @@ import {
 } from '@/lib/geometry';
 import { useDeleteMeasurement, useMeasurements } from '@/hooks/useAnnotations';
 import { cn, formatRelativeTime } from '@/lib/utils';
+import { aggregatePartSummaries, collectLeafPartIds, findPartNode } from '@/lib/partTree';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -238,14 +239,23 @@ export function MeasurementsPanel({
 
   const deletableItems = items.filter(canDelete);
 
-  // Resolve inspected part summary (fallback to single part if tree id differs from mesh id)
+  // Resolve inspected part summary (fallback to single part if tree id differs from mesh id).
+  // Assembly / sub-assembly nodes have no mesh (and no summary) of their own:
+  // aggregate the summaries of their leaf parts instead of showing nothing.
+  const partTree = useViewerStore((s) => s.partTree);
   const activeSummary: PartMetricsSummary | null = React.useMemo(() => {
     if (!inspectedPartId) return null;
     const exact = partSummaries.find((p) => p.partId === inspectedPartId);
     if (exact) return exact;
+    const node = findPartNode(partTree, inspectedPartId);
+    if (node && node.children.length > 0) {
+      const leafIds = new Set(collectLeafPartIds(node));
+      const leaves = partSummaries.filter((p) => leafIds.has(p.partId));
+      if (leaves.length > 0) return aggregatePartSummaries(node.id, node.name, leaves);
+    }
     if (partSummaries.length === 1) return partSummaries[0];
     return null;
-  }, [inspectedPartId, partSummaries]);
+  }, [inspectedPartId, partSummaries, partTree]);
 
   const activePartFeatures = React.useMemo(() => {
     if (!activeSummary) return [];
