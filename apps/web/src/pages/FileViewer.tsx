@@ -18,6 +18,8 @@ import {
 } from '@cadline/shared';
 import { apiFetch } from '@/lib/api';
 import { cn, formatBytes } from '@/lib/utils';
+import { countTreeParts } from '@/lib/partTree';
+import { useViewerStore } from '@/stores/viewerStore';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { usePresenceStore } from '@/stores/presenceStore';
 import { useAiStore } from '@/stores/aiStore';
@@ -217,8 +219,11 @@ export function FileViewerPage({
             <p className="truncate text-sm font-semibold leading-tight text-foreground">
               {file.name}
             </p>
-            <p className="font-mono text-[10px] tabular-nums text-muted-foreground">
-              {file.extension.toUpperCase()} · {formatBytes(file.sizeBytes)}
+            <p className="flex items-center gap-1.5 font-mono text-[10px] tabular-nums text-muted-foreground">
+              <span>
+                {file.extension.toUpperCase()} · {formatBytes(file.sizeBytes)}
+              </span>
+              {!is2D && <AssemblyPartsBadge />}
             </p>
           </div>
         </div>
@@ -423,5 +428,20 @@ export function FileViewerPage({
         />
       )}
     </div>
+  );
+}
+
+/** "Parts: N" in the file header for multi-part (assembly) 3D files. */
+function AssemblyPartsBadge() {
+  const parts = useViewerStore((s) => countTreeParts(s.partTree));
+  if (parts < 2) return null;
+  return (
+    <span
+      data-testid="assembly-parts-badge"
+      className="rounded border border-primary/30 bg-primary/10 px-1.5 text-primary"
+      title="Part instances in this assembly"
+    >
+      Parts: {parts}
+    </span>
   );
 }

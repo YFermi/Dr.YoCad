@@ -1,13 +1,34 @@
 import * as React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, FileUp, Upload, XCircle } from 'lucide-react';
-import type { DesignFile, UploadInitResponse } from '@cadline/shared';
+import { CheckCircle2, ExternalLink, FileUp, Upload, XCircle } from 'lucide-react';
+import {
+  fileExtension,
+  isSolidWorksNativeFile,
+  SOLIDWORKS_EXPORT_HELP_URL,
+  SOLIDWORKS_NATIVE_UNSUPPORTED_MESSAGE,
+  SUPPORTED_2D_EXTENSIONS,
+  SUPPORTED_3D_EXTENSIONS,
+  type DesignFile,
+  type UploadInitResponse,
+} from '@cadline/shared';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { apiFetch } from '@/lib/api';
 import { cn, formatBytes } from '@/lib/utils';
 import { toast } from '@/components/ui/toast';
 
 const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MiB S3/MinIO multipart minimum
 const MAX_SIZE_BYTES = 500 * 1024 * 1024; // 500 MiB
+// DWG is passed through: the server answers with its ODA File Converter guidance.
+const UPLOADABLE_EXTENSIONS = new Set<string>([...SUPPORTED_3D_EXTENSIONS, ...SUPPORTED_2D_EXTENSIONS, 'dwg']);
+const ACCEPT_ATTRIBUTE = [...UPLOADABLE_EXTENSIONS].map((ext) => `.${ext}`).join(',');
 
 interface UploadDropzoneProps {
   projectId: string;
@@ -37,6 +58,7 @@ export function UploadDropzone({
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = React.useState(false);
   const [uploads, setUploads] = React.useState<UploadItemProgress[]>([]);
+  const [rejectedSolidWorks, setRejectedSolidWorks] = React.useState<string[]>([]);
 
   const updateUpload = (
     id: string,
@@ -149,9 +171,24 @@ export function UploadDropzone({
 
   const handleFiles = (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
+    const solidWorks: string[] = [];
     for (const file of Array.from(fileList)) {
+      // Rejected before upload: never sent to the server.
+      if (isSolidWorksNativeFile(file.name)) {
+        solidWorks.push(file.name);
+        continue;
+      }
+      const ext = fileExtension(file.name);
+      if (!UPLOADABLE_EXTENSIONS.has(ext)) {
+        toast.error(
+          `Unsupported file type${ext ? ` .${ext}` : ''}`,
+          `${file.name} was not uploaded. Supported: STEP, IGES, BREP, STL, OBJ, GLB/GLTF, DXF, PDF. Export to STEP from your CAD tool.`
+        );
+        continue;
+      }
       void uploadSingleFile(file);
     }
+    if (solidWorks.length > 0) setRejectedSolidWorks(solidWorks);
   };
 
   return (
@@ -187,7 +224,7 @@ export function UploadDropzone({
           ref={inputRef}
           type="file"
           multiple
-          accept=".step,.stp,.iges,.igs,.brep,.stl,.obj,.glb,.gltf,.dxf,.dwg,.pdf"
+          accept={ACCEPT_ATTRIBUTE}
           className="hidden"
           onChange={(e) => {
             handleFiles(e.target.files);
@@ -201,7 +238,7 @@ export function UploadDropzone({
           Drop CAD models or 2D drawings here or click to browse
         </p>
         <p className="mt-1 font-mono text-xs text-muted-foreground">
-          STEP, IGES, STL, OBJ, GLB, DXF, PDF · 5 MB chunks · up to 500 MB
+          STEP, IGES, BREP, STL, OBJ, GLB, DXF, PDF · 5 MB chunks · up to 500 MB
         </p>
       </div>
 
@@ -257,6 +294,43 @@ export function UploadDropzone({
           ))}
         </div>
       )}
+
+      <Dialog
+        open={rejectedSolidWorks.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setRejectedSolidWorks([]);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <div data-testid="solidworks-rejection" className="space-y-3">
+          <DialogHeader>
+            <DialogTitle>SolidWorks file not uploaded</DialogTitle>
+            <DialogDescription>{SOLIDWORKS_NATIVE_UNSUPPORTED_MESSAGE}</DialogDescription>
+          </DialogHeader>
+          <ul className="space-y-1 px-1 font-mono text-xs text-muted-foreground">
+            {rejectedSolidWorks.map((name) => (
+              <li key={name} className="truncate">
+                {name}
+              </li>
+            ))}
+          </ul>
+          <DialogFooter>
+            <a
+              href={SOLIDWORKS_EXPORT_HELP_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              How to export from SolidWorks
+              <ExternalLink className="h-3 w-3" />
+            </a>
+            <Button size="sm" onClick={() => setRejectedSolidWorks([])}>
+              OK
+            </Button>
+          </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

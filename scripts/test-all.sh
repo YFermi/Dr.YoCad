@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs every Cadline test suite against the Fastify API and exits non-zero if
+# Runs every Dr.Yo CAD test suite against the Fastify API and exits non-zero if
 # any fail. Expects the stack to be up (docker compose, migrate, seed, API).
 #
 #   bash scripts/test-all.sh
@@ -18,7 +18,7 @@ source "${ROOT_DIR}/scripts/lib/auth.sh"
 # shellcheck source=lib/upload.sh
 source "${ROOT_DIR}/scripts/lib/upload.sh"
 
-echo "== Cadline test-all against ${API_URL}"
+echo "== Dr.Yo CAD test-all against ${API_URL}"
 
 # --- 1. API health (Postgres, Redis, S3 all reachable) ---------------------
 deadline=$(( $(date +%s) + READY_TIMEOUT_S ))
@@ -90,6 +90,7 @@ run_suite "test-realtime" bash scripts/test-realtime.sh
 run_suite "test-realtime-reconnect" bash scripts/test-realtime-reconnect.sh
 run_suite "test-ai" bash scripts/test-ai.sh
 run_suite "test-measurements" bash scripts/test-measurements.sh
+run_suite "test-assembly" bash scripts/test-assembly.sh
 
 echo
 echo "================ Summary ================"

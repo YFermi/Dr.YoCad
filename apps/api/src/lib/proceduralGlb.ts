@@ -8,7 +8,11 @@ import {
   type Material,
   type Node as GltfNode,
 } from '@gltf-transform/core';
-import type { PartNode } from '@cadline/shared';
+import {
+  isSolidWorksNativeFile,
+  SOLIDWORKS_NATIVE_UNSUPPORTED_MESSAGE,
+  type PartNode,
+} from '@cadline/shared';
 
 export interface ProceduralConversionArtifact {
   glbBuffer: Uint8Array;
@@ -138,6 +142,58 @@ function normalizeRgb(color?: [number, number, number] | null): [number, number,
   return [clamp(color[0]), clamp(color[1]), clamp(color[2])];
 }
 
+/**
+ * Stable color for an uncolored part in a multi-part file, from its name path
+ * (e.g. "GEARBOX/SHAFT_ASSY/GEAR"): same part -> same color across instances
+ * and re-conversions, different parts -> well-separated hues. Returns linear
+ * RGB (glTF baseColorFactor) for a mid-saturation sRGB color.
+ */
+export function partColorFromPath(path: string): [number, number, number] {
+  let h = 0x811c9dc5; // FNV-1a
+  for (let i = 0; i < path.length; i++) {
+    h ^= path.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  // Golden-angle spacing of the hash spreads similar names apart.
+  const hue = ((h % 360) + ((h >>> 9) % 7) * 137.508) % 360;
+  const sat = 0.5 + ((h >>> 16) % 20) / 100; // 0.50-0.69
+  const light = 0.56 + ((h >>> 24) % 10) / 100; // 0.56-0.65
+  const k = (n: number) => (n + hue / 30) % 12;
+  const a = sat * Math.min(light, 1 - light);
+  const srgb = (n: number) => light - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  const toLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return [toLinear(srgb(0)), toLinear(srgb(8)), toLinear(srgb(4))];
+}
+
+/** Name path of every mesh index referenced by the OCCT node tree. */
+function collectMeshPaths(root: OcctNode | undefined, meshes: OcctMesh[]): Map<number, string> {
+  const paths = new Map<number, string>();
+  const walk = (node: OcctNode, prefix: string[]) => {
+    const name = node.name?.trim();
+    const here = name ? [...prefix, name] : prefix;
+    for (const idx of node.meshes ?? []) {
+      const meshName = meshes[idx]?.name?.trim();
+      paths.set(idx, [...here, ...(meshName && meshName !== name ? [meshName] : [])].join('/'));
+    }
+    for (const child of node.children ?? []) walk(child, here);
+  };
+  if (root) walk(root, []);
+  return paths;
+}
+
+/** "GEAR", "GEAR" -> "GEAR", "GEAR (2)" among siblings. */
+function dedupeSiblingNames(nodes: Array<{ partNode: PartNode; gltfNode: GltfNode }>): void {
+  const seen = new Map<string, number>();
+  for (const n of nodes) {
+    const count = (seen.get(n.partNode.name) ?? 0) + 1;
+    seen.set(n.partNode.name, count);
+    if (count > 1) {
+      n.partNode.name = `${n.partNode.name} (${count})`;
+      n.gltfNode.setName(n.partNode.name);
+    }
+  }
+}
+
 function computeVertexNormals(positions: Float32Array, indices?: Uint32Array): Float32Array {
   const normals = new Float32Array(positions.length);
   const triCount = indices ? Math.floor(indices.length / 3) : Math.floor(positions.length / 9);
@@ -226,6 +282,18 @@ async function convertBrepToGlb(
   // Pre-build a glTF Mesh for each valid OCCT mesh entry
   const builtMeshes = new Map<number, { mesh: ReturnType<Document['createMesh']>; name: string }>();
 
+  // Multi-part files (assemblies): parts without a color in the file get a
+  // stable per-part color so they are distinguishable. Single parts and parts
+  // with file colors keep their colors.
+  const meshPaths = collectMeshPaths(parsed.root, parsed.meshes);
+  const renderableCount = parsed.meshes.filter(
+    (m) => (m.attributes?.position?.array?.length ?? 0) >= 9
+  ).length;
+  const autoColor = (m: OcctMesh, meshIndex: number): [number, number, number] | null =>
+    renderableCount > 1 && !m.color
+      ? partColorFromPath(meshPaths.get(meshIndex) ?? m.name?.trim() ?? `mesh-${meshIndex}`)
+      : null;
+
   parsed.meshes.forEach((m, meshIndex) => {
     const rawPos = m.attributes?.position?.array;
     if (!rawPos || rawPos.length < 9) return;
@@ -254,7 +322,7 @@ async function convertBrepToGlb(
 
     const meshName = m.name?.trim() || `Part ${meshIndex + 1}`;
     const gltfMesh = doc.createMesh(meshName);
-    const defaultRgb = normalizeRgb(m.color);
+    const defaultRgb = autoColor(m, meshIndex) ?? normalizeRgb(m.color);
 
     // Check if brep_faces defines distinct per-face colors
     const brepFaces = m.brep_faces;
@@ -386,17 +454,21 @@ async function convertBrepToGlb(
       referencedMeshes.add(idx);
       gltfNode.setMesh(builtMeshes.get(idx)!.mesh);
     } else {
+      // occt-import-js reports the parts of a nested sub-assembly as meshes of
+      // that node rather than child nodes, so rebuild one leaf per mesh.
+      const siblings: Array<{ partNode: PartNode; gltfNode: GltfNode }> = [];
       for (const idx of validMeshIndices) {
         referencedMeshes.add(idx);
         const entry = builtMeshes.get(idx)!;
         const leafId = nextPartId();
         const leafNode = doc.createNode(entry.name).setMesh(entry.mesh).setExtras({ partId: leafId });
-        gltfNode.addChild(leafNode);
-        partChildren.push({ id: leafId, name: entry.name, children: [] });
+        siblings.push({ gltfNode: leafNode, partNode: { id: leafId, name: entry.name, children: [] } });
       }
-      for (const child of childResults) {
-        gltfNode.addChild(child.gltfNode);
-        partChildren.push(child.partNode);
+      siblings.push(...childResults);
+      dedupeSiblingNames(siblings);
+      for (const sibling of siblings) {
+        gltfNode.addChild(sibling.gltfNode);
+        partChildren.push(sibling.partNode);
       }
     }
 
@@ -817,6 +889,10 @@ export async function convertUploadedBuffer(
 ): Promise<ProceduralConversionArtifact> {
   const ext = path.extname(fileName).replace('.', '').toLowerCase();
   const baseName = path.basename(fileName, path.extname(fileName)) || 'Uploaded Model';
+
+  if (isSolidWorksNativeFile(fileName)) {
+    throw new Error(SOLIDWORKS_NATIVE_UNSUPPORTED_MESSAGE);
+  }
 
   if (ext === 'glb' || ext === 'gltf') {
     const io = new NodeIO();

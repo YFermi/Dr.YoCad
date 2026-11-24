@@ -64,7 +64,7 @@ jobs:
           echo "::error title=API start failed::$(tail -n 40 api.log | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"}{print}')"
           exit 1
 
-      - name: Run all 7 suites
+      - name: Run all suites (scripts/test-all.sh)
         run: bash scripts/ci/run-step.sh test-all bash scripts/test-all.sh
 
       - name: API log
