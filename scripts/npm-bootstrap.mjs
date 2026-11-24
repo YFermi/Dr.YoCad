@@ -17,6 +17,11 @@ if (!/^pnpm@\d+\.\d+\.\d+$/.test(packageManager ?? '')) {
   process.exit(1);
 }
 
+// npm prunes pnpm's hoisted root links (tsx, concurrently) as extraneous before
+// this script runs. Dropping pnpm's up-to-date marker makes it re-link them
+// (fast: the store and node_modules/.pnpm are already in place).
+fs.rmSync(path.join(repoDir, 'node_modules', '.pnpm-workspace-state-v1.json'), { force: true });
+
 console.log(`[bootstrap] npm install -> ${packageManager} install (workspace dependencies)`);
 const result = spawnSync('npx', ['--yes', packageManager, 'install'], {
   cwd: repoDir,

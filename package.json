@@ -11,9 +11,5 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "bash scripts/test-all.sh"
-  },
-  "devDependencies": {
-    "concurrently": "^9.2.1",
-    "tsx": "^4.21.0"
   }
 }
