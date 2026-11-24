@@ -1,8 +1,7 @@
 import * as React from 'react';
 import * as THREE from 'three';
-import { useFrame } from '@react-three/fiber';
 import { Line } from '@react-three/drei';
-import { Check, Pencil, Trash2, X } from 'lucide-react';
+import { Pencil, Trash2, X } from 'lucide-react';
 import {
   isMeasurementPointsSmart,
   smartKindToMeasurementType,
@@ -22,7 +21,6 @@ import {
 import { useMeasureStore } from '@/stores/measureStore';
 import { useViewerStore } from '@/stores/viewerStore';
 import { useDeleteMeasurement, useUpdateMeasurement } from '@/hooks/useAnnotations';
-import { DimensionLine } from '@/components/viewer/DimensionLine';
 import { cn } from '@/lib/utils';
 
 function buildTriangleHighlightGeometry(
@@ -118,36 +116,22 @@ function FeatureHighlightMesh({
   );
 }
 
-interface MeasureOverlay3DProps {
-  markerRadius: number;
-  labelElementsRef: React.RefObject<Map<string, HTMLDivElement>>;
-}
-
 /**
- * Mounted inside `<Canvas>`. Renders:
- *  - Feature hover & selection highlights (blue planes, orange cylinders, green circles)
- *  - Pending, quick-preview, local, and persisted Smart Dimension lines
- *  - Per-frame 3D->screen projection into React-19-safe DOM label elements
+ * Mounted inside `<Canvas>`. Renders feature hover & selection highlights
+ * (blue planes, orange cylinders, green circles) and the measurement keyboard
+ * shortcuts. Dimension lines, arrows, points and labels are drawn in screen
+ * space by DimensionOverlay2D (outside the canvas).
  */
-export function MeasureOverlay3D({
-  markerRadius,
-  labelElementsRef,
-}: MeasureOverlay3DProps) {
+export function MeasureOverlay3D() {
   const mode = useMeasureStore((s) => s.mode);
   const hoveredFeatureId = useMeasureStore((s) => s.hoveredFeatureId);
   const focusedFeatureId = useMeasureStore((s) => s.focusedFeatureId);
   const selection = useMeasureStore((s) => s.selection);
-  const quickPreview = useMeasureStore((s) => s.quickPreview);
-  const pendingResult = useMeasureStore((s) => s.pendingResult);
-  const relatedResults = useMeasureStore((s) => s.relatedResults);
-  const localResults = useMeasureStore((s) => s.localResults);
-  const persistedResults = useMeasureStore((s) => s.persistedResults);
   const featureIndex = useMeasureStore((s) => s.featureIndex);
   const cancel = useMeasureStore((s) => s.cancel);
   const removeLastSelection = useMeasureStore((s) => s.removeLastSelection);
   const commitResult = useMeasureStore((s) => s.commitResult);
 
-  const projectedVecRef = React.useRef(new THREE.Vector3());
 
   // Global keyboard shortcuts for measurement workflow (ESC, Backspace, Enter)
   React.useEffect(() => {
@@ -178,41 +162,6 @@ export function MeasureOverlay3D({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [cancel, removeLastSelection, commitResult]);
-
-  useFrame(({ camera, size }) => {
-    const labelMap = labelElementsRef.current;
-    if (!labelMap) return;
-    const vec = projectedVecRef.current;
-
-    const projectEntry = (key: string, anchor: Vec3Tuple) => {
-      const el = labelMap.get(key);
-      if (!el) return;
-      vec.set(anchor[0], anchor[1], anchor[2]).project(camera);
-      if (vec.z > 1 || vec.z < -1) {
-        el.style.opacity = '0';
-        el.style.pointerEvents = 'none';
-        return;
-      }
-      const x = (vec.x * 0.5 + 0.5) * size.width;
-      const y = (-vec.y * 0.5 + 0.5) * size.height;
-      el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) translate(-50%, -50%)`;
-      el.style.opacity = '1';
-      el.style.pointerEvents = el.dataset.interactive === 'true' ? 'auto' : 'none';
-    };
-
-    if (pendingResult) {
-      projectEntry(`pending:${pendingResult.id}`, pendingResult.anchor);
-    }
-    for (const rel of relatedResults) {
-      projectEntry(`related:${rel.id}`, rel.anchor);
-    }
-    for (const loc of localResults) {
-      projectEntry(`local:${loc.id}`, loc.anchor);
-    }
-    for (const per of persistedResults) {
-      projectEntry(`persisted:${per.id}`, per.anchor);
-    }
-  });
 
   const selectedFeatureIds = React.useMemo(() => {
     const ids = new Set<string>();
@@ -251,59 +200,6 @@ export function MeasureOverlay3D({
         />
       )}
 
-      {/* Selected reference markers */}
-      {selection.map((ref, idx) => (
-        <mesh key={`sel-pt-${idx}`} position={ref.position} raycast={() => undefined}>
-          <sphereGeometry args={[markerRadius * 0.9, 16, 16]} />
-          <meshBasicMaterial color="#38bdf8" depthTest={false} />
-        </mesh>
-      ))}
-
-      {/* Quick Measure hover preview */}
-      {mode === 'quick' && quickPreview && (
-        <DimensionLine
-          measurement={quickPreview}
-          variant="preview"
-          markerRadius={markerRadius}
-        />
-      )}
-
-      {/* Active pending Smart Measurement + chained related measurements */}
-      {pendingResult && (
-        <DimensionLine
-          measurement={pendingResult}
-          variant="pending"
-          markerRadius={markerRadius}
-        />
-      )}
-      {relatedResults.map((rel) => (
-        <DimensionLine
-          key={`rel-${rel.id}`}
-          measurement={rel}
-          variant="related"
-          markerRadius={markerRadius * 0.85}
-        />
-      ))}
-
-      {/* Local / in-flight committed measurements */}
-      {localResults.map((loc) => (
-        <DimensionLine
-          key={`loc-${loc.id}`}
-          measurement={loc}
-          variant="pending"
-          markerRadius={markerRadius}
-        />
-      ))}
-
-      {/* Persisted measurements (Smart + backward-compatible legacy 3D) */}
-      {persistedResults.map((per) => (
-        <DimensionLine
-          key={`per-${per.id}`}
-          measurement={per}
-          variant="persisted"
-          markerRadius={markerRadius}
-        />
-      ))}
     </group>
   );
 }
@@ -311,24 +207,20 @@ export function MeasureOverlay3D({
 interface MeasureLabelOverlayProps {
   fileId?: string;
   canEdit?: boolean;
-  labelElementsRef: React.RefObject<Map<string, HTMLDivElement>>;
 }
 
 /**
- * React-19-safe DOM overlay mounted outside `<Canvas>` for floating measurement
- * badges, Quick Measure hover tooltip, and double-click measurement edit popup.
+ * React-19-safe DOM overlay mounted outside `<Canvas>` for the Quick Measure
+ * hover tooltip and the double-click measurement edit popup. Dimension labels
+ * are rendered by DimensionOverlay2D.
  */
 export function MeasureLabelOverlay({
   fileId,
   canEdit = true,
-  labelElementsRef,
 }: MeasureLabelOverlayProps) {
   const mode = useMeasureStore((s) => s.mode);
   const quickPreview = useMeasureStore((s) => s.quickPreview);
   const hoveredScreenPos = useMeasureStore((s) => s.hoveredScreenPos);
-  const pendingResult = useMeasureStore((s) => s.pendingResult);
-  const relatedResults = useMeasureStore((s) => s.relatedResults);
-  const localResults = useMeasureStore((s) => s.localResults);
   const persistedResults = useMeasureStore((s) => s.persistedResults);
   const displayUnit = useMeasureStore((s) => s.displayUnit);
   const editingMeasurementId = useMeasureStore((s) => s.editingMeasurementId);
@@ -399,75 +291,8 @@ export function MeasureLabelOverlay({
     return formatSmartMeasurementDisplay(converted);
   };
 
-  const registerRef = (key: string) => (node: HTMLDivElement | null) => {
-    if (node) {
-      labelElementsRef.current.set(key, node);
-    } else {
-      labelElementsRef.current.delete(key);
-    }
-  };
-
   return (
     <>
-      {/* Projected 3D labels */}
-      <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
-        {pendingResult && (
-          <div
-            key={`pending:${pendingResult.id}`}
-            ref={registerRef(`pending:${pendingResult.id}`)}
-            className="pointer-events-none absolute left-0 top-0 select-none whitespace-nowrap rounded border border-sky-400 bg-[#0b1018] px-2 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-sky-300 opacity-0 shadow-xl"
-          >
-            {pendingResult.label ? `${pendingResult.label}: ` : ''}
-            {formatForDisplay(pendingResult)}
-          </div>
-        )}
-
-        {relatedResults.map((rel) => (
-          <div
-            key={`related:${rel.id}`}
-            ref={registerRef(`related:${rel.id}`)}
-            className="pointer-events-none absolute left-0 top-0 select-none whitespace-nowrap rounded border border-violet-400/70 bg-[#0b1018] px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-violet-300 opacity-0 shadow-lg"
-          >
-            {formatForDisplay(rel)}
-          </div>
-        ))}
-
-        {localResults.map((loc) => (
-          <div
-            key={`local:${loc.id}`}
-            ref={registerRef(`local:${loc.id}`)}
-            className="pointer-events-none absolute left-0 top-0 select-none whitespace-nowrap rounded border border-primary/70 bg-[#0b0e14] px-2 py-0.5 font-mono text-[11px] font-medium tabular-nums text-sky-300 opacity-0 shadow-lg"
-          >
-            {loc.label ? `${loc.label} · ` : ''}
-            {formatForDisplay(loc)}
-          </div>
-        ))}
-
-        {persistedResults.map((per) => (
-          <div
-            key={`persisted:${per.id}`}
-            ref={registerRef(`persisted:${per.id}`)}
-            data-interactive={canEdit ? 'true' : 'false'}
-            onDoubleClick={(e) => {
-              if (!canEdit) return;
-              e.stopPropagation();
-              setEditingMeasurementId(per.id);
-            }}
-            title={canEdit ? 'Double-click to edit label, unit, or delete' : undefined}
-            className={cn(
-              'absolute left-0 top-0 flex items-center gap-1 select-none whitespace-nowrap rounded border border-amber-500/70 bg-[#0b0e14] px-2 py-0.5 font-mono text-[11px] font-medium tabular-nums text-amber-300 opacity-0 shadow-lg',
-              canEdit && 'cursor-pointer hover:border-amber-300 hover:bg-[#141a24]'
-            )}
-          >
-            <Check className="h-3 w-3 shrink-0 text-amber-400" />
-            <span>
-              {per.label ? `${per.label}: ` : ''}
-              {formatSmartMeasurementDisplay(per)}
-            </span>
-          </div>
-        ))}
-      </div>
-
       {/* Quick Measure floating cursor tooltip */}
       {mode === 'quick' && quickPreview && hoveredScreenPos && (
         <div
