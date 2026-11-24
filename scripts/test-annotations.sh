@@ -33,7 +33,7 @@ step_fail() {
   FAIL_COUNT=$((FAIL_COUNT + 1))
 }
 
-echo "Testing Cadline Session 3 endpoints against ${API_URL}"
+echo "Testing Dr.Yo CAD Session 3 endpoints against ${API_URL}"
 echo "------------------------------------------------------------"
 
 # 1. Register a fresh user

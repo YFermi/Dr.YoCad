@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared login helper for Cadline shell scripts. Source it, then call:
+# Shared login helper for Dr.Yo CAD shell scripts. Source it, then call:
 #
 #   cadline_login [email] [password]
 #

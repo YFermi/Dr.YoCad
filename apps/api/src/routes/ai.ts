@@ -311,7 +311,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
       const ctx = buildAiFileContext(loaded);
 
       const systemInstruction = [
-        'You are the Cadline Design Assistant helping mechanical and CAD engineers review a design file.',
+        'You are the Dr.Yo CAD Design Assistant helping mechanical and CAD engineers review a design file.',
         'You are given structured file metadata, assembly part tree (3D) or drawing layers/notes (2D), annotations numbered #1..#N, comments, and measurements.',
         'You do NOT see raw mesh triangles, B-rep solids, or raw PDF pixels—never claim to have visually inspected raw geometry.',
         'When referencing specific annotations, cite them with #1, #2, etc. matching the `ref` field in the context JSON.',

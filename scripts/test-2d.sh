@@ -5,7 +5,7 @@ API_URL="${API_URL:-http://localhost:4000/api/v1}"
 DEMO_EMAIL="${DEMO_EMAIL:-admin@demo.local}"
 DEMO_PASSWORD="${DEMO_PASSWORD:-Password123!}"
 
-echo "==> Cadline Session 4 — 2D Drawing Viewer Smoke Test"
+echo "==> Dr.Yo CAD Session 4 — 2D Drawing Viewer Smoke Test"
 echo "    API_URL=${API_URL}"
 
 # 1. Authenticate
